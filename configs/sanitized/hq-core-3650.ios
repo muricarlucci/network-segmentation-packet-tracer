@@ -1,8 +1,6 @@
-! ==============================================================================
-! ATIVO: HQ-Core-3650 (Switch Multicamada L3 - Matriz SP)
-! ARQUIVO: 01_HQ-Core-3650.ios
-! FUNCAO: Roteamento Inter-VLANs, Gateways SVI, DHCP Server e OSPF Area 0
-! ==============================================================================
+# ATIVO: HQ-Core-3650 (Switch Multicamada L3 - Matriz SP)
+## ARQUIVO: 01_HQ-Core-3650.ios
+## FUNCAO: Roteamento Inter-VLANs, Gateways SVI, DHCP Server e OSPF Area 0
 
 ENABLE
 CONF T
