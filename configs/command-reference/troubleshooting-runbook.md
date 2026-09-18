@@ -1,869 +1,571 @@
-# 🛠️ Troubleshooting Runbook — PROJETO ANIBIA
+# Troubleshooting Runbook — Diagnóstico Operacional da Infraestrutura ANBIMA
 
-> **Guia operacional de diagnóstico e resolução de falhas da infraestrutura de rede simulada no Cisco Packet Tracer.**
->
-> Este documento organiza uma sequência prática para identificar, isolar e corrigir problemas de conectividade, comutação, roteamento, DHCP, OSPF, eBGP, redistribuição de rotas, contingência WAN e gerenciamento SSHv2.
+[![Routing: OSPFv2 + eBGP](https://img.shields.io/badge/Routing-OSPFv2%20%2B%20eBGP-red)](#-5-diagnóstico-de-roteamento)
+[![Switching: VLAN + 802.1Q](https://img.shields.io/badge/Switching-VLAN%20%2B%20802.1Q-blue)](#-3-diagnóstico-de-vlans-e-trunks)
+[![Services: DHCP Core](https://img.shields.io/badge/Services-DHCP%20Core-orange)](#-4-diagnóstico-do-dhcp)
+[![Resilience: WAN Ring](https://img.shields.io/badge/Resilience-WAN%20Ring-darkgreen)](#-6-diagnóstico-de-falhas-wan)
+
+Runbook de diagnóstico da infraestrutura corporativa simulada da ANBIMA no Cisco Packet Tracer. Este documento organiza a identificação progressiva de falhas nas camadas física, de comutação, roteamento, serviços de rede, integração OSPF/eBGP, redistribuição de rotas e mecanismos de contingência WAN.
+
+O diagnóstico considera os três sítios da arquitetura — **Matriz SP**, **Filial Regional RJ** e **CPD Regulatório/Datacenter** — utilizando os ativos, interfaces, VLANs, endereçamento e protocolos definidos no projeto.
 
 ---
 
-## 📌 Objetivo
+## 🏛️ 1. Modelo de Diagnóstico Progressivo
 
-O **Troubleshooting Runbook** deve ser utilizado quando algum componente da infraestrutura apresentar comportamento diferente do esperado.
+O diagnóstico da infraestrutura segue uma abordagem de isolamento progressivo, partindo da camada mais próxima do ativo afetado e avançando até os mecanismos de roteamento e contingência.
 
-A metodologia adotada é baseada em **isolamento progressivo da falha**:
+```mermaid id="9h6s4r"
+flowchart TD
+    A["Falha de Comunicação"] --> B["1. Interfaces / Conectividade"]
+    B --> C["2. VLANs / Switching"]
+    C --> D["3. SVI / Gateway / L3"]
+    D --> E["4. DHCP"]
+    E --> F["5. OSPF"]
+    F --> G["6. eBGP"]
+    G --> H["7. Redistribuição"]
+    H --> I["8. WAN / Failover"]
 
-```text
-Sintoma
-   │
-   ▼
-┌───────────────────────┐
-│ 1. Camada física/L1   │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 2. VLAN / Trunk / L2  │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 3. Endereçamento / L3 │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 4. DHCP               │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 5. OSPF               │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 6. eBGP               │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 7. Redistribuição     │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 8. Conectividade      │
-└───────────┬───────────┘
-            ▼
-┌───────────────────────┐
-│ 9. Contingência WAN   │
-└───────────────────────┘
+    B --> B1["show ip interface brief"]
+    B --> B2["Interfaces UP / UP"]
+
+    C --> C1["VLANs"]
+    C --> C2["Trunk 802.1Q"]
+    C --> C3["Allowed VLAN"]
+
+    D --> D1["SVIs"]
+    D --> D2["ip routing"]
+    D --> D3["Gateway"]
+
+    E --> E1["DHCP Pools"]
+    E --> E2["Excluded Address"]
+    E --> E3["DHCP Binding"]
+
+    F --> F1["OSPF Area 0"]
+    F --> F2["Neighbors"]
+    F --> F3["Routes"]
+
+    G --> G1["AS 65001"]
+    G --> G2["AS 65002"]
+    G --> G3["TCP/179"]
+
+    H --> H1["OSPF → BGP"]
+    H --> H2["BGP → OSPF"]
+
+    I --> I1["WAN 1"]
+    I --> I2["WAN 2"]
+    I --> I3["AD 115"]
 ```
 
-A regra principal é:
+### Ordem de isolamento
 
-> **Não começar pelo protocolo de roteamento quando ainda não foi comprovado que as interfaces, VLANs, trunks e endereços IP estão funcionando.**
-
----
-
-# 🧭 1. Diagnóstico Inicial
-
-Antes de alterar qualquer configuração, identificar:
-
-* qual dispositivo apresenta o problema;
-* qual origem está iniciando o tráfego;
-* qual destino deveria ser alcançado;
-* qual segmento de rede está envolvido;
-* se o problema é local ou remoto;
-* se o problema ocorre sempre ou somente após uma falha;
-* se outros dispositivos continuam funcionando normalmente.
+| Etapa | Camada             | Elemento principal   | Verificação                     |
+| :---- | :----------------- | :------------------- | :------------------------------ |
+| **1** | Física / Interface | Interfaces e enlaces | Estado `up/up`                  |
+| **2** | L2                 | VLANs e trunks       | VLAN correta e trunk autorizado |
+| **3** | L3 local           | SVIs e trânsito      | Gateway e interfaces L3         |
+| **4** | Serviços           | DHCP                 | Pool, exclusões e lease         |
+| **5** | IGP                | OSPFv2               | Adjacência e rotas              |
+| **6** | EGP                | eBGPv4               | Peering e prefixos              |
+| **7** | Integração         | Redistribuição       | Rotas entre OSPF/BGP            |
+| **8** | Resiliência        | WAN 1 / WAN 2        | Contingência AD 115             |
 
 ---
 
-## 1.1 Registrar origem e destino
+# 🔎 2. Diagnóstico Inicial da Infraestrutura
 
-Exemplo do fluxo principal utilizado no teste de contingência:
+Antes de investigar um protocolo específico, a primeira referência é o estado das interfaces dos equipamentos.
 
-```text
-Origem:
-PC-RJ-Ops-01
-172.19.2.51
-
-        │
-        ▼
-
-Destino:
-Server-Financial-Hub
-172.16.32.10
-```
-
-Teste básico:
-
-```text
-ping 172.16.32.10
-```
-
----
-
-## 1.2 Verificar o estado geral do dispositivo
+### Comando principal
 
 ```cisco
 show ip interface brief
 ```
 
-Se houver uma interface `administratively down`, `down` ou sem protocolo ativo, corrigir esse ponto antes de avançar para OSPF ou BGP.
+### Resultado esperado
+
+As interfaces utilizadas pela arquitetura devem estar operacionalmente disponíveis conforme sua função.
+
+### Interfaces principais
+
+| Equipamento          | Interface   | Função               | Endereço           |
+| :------------------- | :---------- | :------------------- | :----------------- |
+| `HQ-Edge-RTR`        | `Gig0/0`    | Trânsito L3 com Core | `172.16.16.2/30`   |
+| `HQ-Edge-RTR`        | `Se0/3/0`   | WAN 1 — RJ           | `10.0.0.1/30`      |
+| `HQ-Edge-RTR`        | `Se0/3/1`   | WAN 3 — CPD          | `10.0.0.10/30`     |
+| `HQ-Core-3650`       | `VLAN 10`   | SVI                  | `172.16.0.1/22`    |
+| `HQ-Core-3650`       | `VLAN 20`   | SVI                  | `172.16.4.1/22`    |
+| `HQ-Core-3650`       | `VLAN 30`   | SVI                  | `172.16.8.1/22`    |
+| `HQ-Core-3650`       | `VLAN 40`   | SVI                  | `172.16.12.1/22`   |
+| `HQ-Core-3650`       | `VLAN 99`   | Gerência             | `172.16.99.1/24`   |
+| `HQ-Core-3650`       | `VLAN 200`  | Trânsito L3          | `172.16.16.1/30`   |
+| `Branch-Edge-RTR`    | `Gig0/0`    | Trânsito L3 com Core | `172.19.4.2/30`    |
+| `Branch-Edge-RTR`    | `Se0/3/1`   | WAN 1 — HQ           | `10.0.0.2/30`      |
+| `Branch-Edge-RTR`    | `Se0/3/0`   | WAN 2 — CPD          | `10.0.0.5/30`      |
+| `Branch-Core-3650`   | `VLAN 10`   | SVI                  | `172.19.0.1/23`    |
+| `Branch-Core-3650`   | `VLAN 20`   | SVI                  | `172.19.2.1/23`    |
+| `Branch-Core-3650`   | `VLAN 99`   | Gerência             | `172.19.99.1/24`   |
+| `Branch-Core-3650`   | `VLAN 200`  | Trânsito L3          | `172.19.4.1/30`    |
+| `CPD-Datacenter-RTR` | `Gig0/0`    | LAN CPD              | `172.16.32.1/22`   |
+| `CPD-Datacenter-RTR` | `Loopback0` | Serviço de teste     | `192.168.100.1/32` |
+| `CPD-Datacenter-RTR` | `Se0/3/0`   | WAN 3 — HQ           | `10.0.0.9/30`      |
+| `CPD-Datacenter-RTR` | `Se0/3/1`   | WAN 2 — RJ           | `10.0.0.6/30`      |
 
 ---
 
-# 🔌 2. Problemas de Interface
+# 🧩 3. Diagnóstico de VLANs e Trunks
 
-## Sintoma
+Problemas de comunicação entre estações de uma mesma VLAN ou ausência de conectividade entre o Access e o Core devem ser investigados inicialmente na Camada 2.
 
-Um enlace não apresenta conectividade.
+## 3.1 VLANs da Matriz
 
-### Verificar
+| VLAN  | Segmento                         | Rede             |
+| :---- | :------------------------------- | :--------------- |
+| `10`  | Segurança Operacional / SOC-NOC  | `172.16.0.0/22`  |
+| `20`  | Núcleo Financeiro e Liquidação   | `172.16.4.0/22`  |
+| `30`  | Dados de Mercado e Analytics     | `172.16.8.0/22`  |
+| `40`  | Auditoria e Compliance Normativo | `172.16.12.0/22` |
+| `99`  | Gerência Out-of-Band             | `172.16.99.0/24` |
+| `200` | Trânsito L3                      | `172.16.16.0/30` |
 
-```cisco
-show ip interface brief
-```
-
-Depois:
-
-```cisco
-show interfaces <interface>
-```
-
----
-
-## 2.1 Interface administrativamente desligada
-
-### Sintoma
-
-A interface aparece como:
+### Trunk Matriz
 
 ```text
-administratively down
+HQ-Core-3650
+Gig1/0/1
+      │
+      │ Trunk 802.1Q
+      ▼
+HQ-Access-2960
+Gig0/1
 ```
 
-### Verificação
-
-```cisco
-show ip interface brief
-```
-
-### Correção
-
-Entrar na interface correspondente:
-
-```cisco
-configure terminal
-interface <interface>
-no shutdown
-```
-
-Depois:
-
-```cisco
-show ip interface brief
-```
-
----
-
-## 2.2 Interface serial sem clock
-
-No cenário, os enlaces DCE utilizam:
-
-```text
-clock rate 64000
-```
-
-Topologia WAN:
-
-| Enlace | Interface DCE | Interface DTE |
-| :----- | :------------ | :------------ |
-| WAN 1  | HQ `Se0/3/0`  | RJ `Se0/3/1`  |
-| WAN 2  | RJ `Se0/3/0`  | CPD `Se0/3/1` |
-| WAN 3  | CPD `Se0/3/0` | HQ `Se0/3/1`  |
-
-### Verificar
-
-```cisco
-show controllers serial 0/3/0
-```
-
-ou:
-
-```cisco
-show controllers serial 0/3/1
-```
-
-### No lado DCE
-
-Confirmar:
-
-```text
-clock rate 64000
-```
-
----
-
-## 2.3 Endereço IP incorreto
-
-Verificar:
-
-```cisco
-show ip interface brief
-```
-
-Comparar com o plano definido:
-
-### WAN 1
-
-```text
-HQ: 10.0.0.1/30
-RJ: 10.0.0.2/30
-```
-
-### WAN 2
-
-```text
-RJ: 10.0.0.5/30
-CPD: 10.0.0.6/30
-```
-
-### WAN 3
-
-```text
-CPD: 10.0.0.9/30
-HQ: 10.0.0.10/30
-```
-
----
-
-# 🧩 3. Problemas de VLAN
-
-## Sintoma
-
-Um computador não consegue comunicar com outros equipamentos da mesma VLAN ou não recebe DHCP.
-
-### Verificar:
-
-```cisco
-show vlan brief
-```
-
----
-
-## 3.1 VLAN inexistente
-
-Confirmar a presença das VLANs correspondentes ao local.
-
-### HQ
-
-```text
-10
-20
-30
-40
-99
-200
-```
-
-### RJ
-
-```text
-10
-20
-99
-200
-```
-
-Se a VLAN necessária não aparecer:
-
-```cisco
-show vlan brief
-```
-
-e comparar com a configuração:
-
-```cisco
-show running-config
-```
-
----
-
-## 3.2 Porta de acesso na VLAN incorreta
-
-No switch de acesso:
-
-```cisco
-show vlan brief
-```
-
-Verificar se a porta física do computador está associada à VLAN esperada.
-
-### HQ
-
-A configuração do cenário utiliza:
-
-```text
-F0/1-2 → VLAN 10
-F0/3-4 → VLAN 20
-F0/5-6 → VLAN 30
-F0/7-8 → VLAN 40
-```
-
-### RJ
-
-```text
-F0/1-2 → VLAN 10
-F0/3-4 → VLAN 20
-```
-
-Se necessário:
-
-```cisco
-show running-config interface <interface>
-```
-
----
-
-# 🔀 4. Problemas de Trunk
-
-## Sintoma
-
-As VLANs existem nos dois switches, mas os dispositivos conectados ao Access não conseguem alcançar suas respectivas SVIs no Core.
-
-### Verificar:
-
-```cisco
-show interfaces trunk
-```
-
----
-
-## 4.1 Trunk não operacional
-
-Confirmar que o uplink está em modo trunk.
-
-```cisco
-show running-config interface <interface>
-```
-
-A configuração esperada utiliza:
-
-```cisco
-switchport mode trunk
-```
-
----
-
-## 4.2 VLAN não permitida no trunk
-
-### HQ
-
-O trunk deve transportar:
+VLANs permitidas:
 
 ```text
 10,20,30,40,99
 ```
 
-### RJ
+### Comandos de diagnóstico
 
-O trunk deve transportar:
+```cisco
+show vlan brief
+show interfaces trunk
+```
+
+### Pontos de verificação
+
+| Elemento         | Condição esperada |
+| :--------------- | :---------------- |
+| VLAN 10          | Presente          |
+| VLAN 20          | Presente          |
+| VLAN 30          | Presente          |
+| VLAN 40          | Presente          |
+| VLAN 99          | Presente          |
+| Trunk            | Operacional       |
+| VLANs permitidas | `10,20,30,40,99`  |
+| Portas Fa0/1-2   | VLAN 10           |
+| Portas Fa0/3-4   | VLAN 20           |
+| Portas Fa0/5-6   | VLAN 30           |
+| Portas Fa0/7-8   | VLAN 40           |
+
+---
+
+## 3.2 VLANs da Filial RJ
+
+| VLAN  | Segmento                           | Rede             |
+| :---- | :--------------------------------- | :--------------- |
+| `10`  | Supervisão Regional e Fiscalização | `172.19.0.0/23`  |
+| `20`  | Operações Regionais e Negócios     | `172.19.2.0/23`  |
+| `99`  | Gerência Out-of-Band               | `172.19.99.0/24` |
+| `200` | Trânsito L3                        | `172.19.4.0/30`  |
+
+### Trunk RJ
+
+```text
+Branch-Core-3650
+Gig1/0/1
+      │
+      │ Trunk 802.1Q
+      ▼
+Branch-Access-2960
+Gig0/1
+```
+
+VLANs permitidas:
 
 ```text
 10,20,99
 ```
 
-Verificar:
+### Comandos de diagnóstico
 
 ```cisco
+show vlan brief
 show interfaces trunk
 ```
 
-Se uma VLAN necessária não estiver autorizada, conferir a configuração da interface.
+### Pontos de verificação
+
+| Elemento         | Condição esperada |
+| :--------------- | :---------------- |
+| VLAN 10          | Presente          |
+| VLAN 20          | Presente          |
+| VLAN 99          | Presente          |
+| Trunk            | Operacional       |
+| VLANs permitidas | `10,20,99`        |
+| Portas Fa0/1-2   | VLAN 10           |
+| Portas Fa0/3-4   | VLAN 20           |
+
+A VLAN `200` é destinada ao trânsito L3 entre Core e roteador e não é utilizada como VLAN de usuários.
 
 ---
 
-# 🌐 5. Problemas de SVI e Routing L3
+# 🌐 4. Diagnóstico do DHCP
 
-## Sintoma
+Os Switches Core Catalyst 3650 funcionam como servidores DHCP locais.
 
-O computador possui endereço IP, mas não consegue alcançar o gateway.
-
-### Primeiro:
-
-```cisco
-show ip interface brief
-```
-
-Verificar as SVIs.
-
----
-
-## 5.1 HQ-Core-3650
-
-SVIs esperadas:
+A configuração reserva os primeiros 50 endereços de cada sub-rede departamental.
 
 ```text
-Vlan10  → 172.16.0.1/22
-Vlan20  → 172.16.4.1/22
-Vlan30  → 172.16.8.1/22
-Vlan40  → 172.16.12.1/22
-Vlan99  → 172.16.99.1/24
-Vlan200 → 172.16.16.1/30
+.1 até .50
 ```
 
----
-
-## 5.2 Branch-Core-3650
+A distribuição dinâmica começa em:
 
 ```text
-Vlan10  → 172.19.0.1/23
-Vlan20  → 172.19.2.1/23
-Vlan99  → 172.19.99.1/24
-Vlan200 → 172.19.4.1/30
+.51
 ```
 
----
+## 4.1 DHCP da Matriz
 
-## 5.3 Verificar `ip routing`
+### Pools
 
-Nos Core:
+| Pool             | Rede             | Gateway       | DNS            |
+| :--------------- | :--------------- | :------------ | :------------- |
+| `POOL_SEC_OPS`   | `172.16.0.0/22`  | `172.16.0.1`  | `172.16.32.10` |
+| `POOL_FINANCIAL` | `172.16.4.0/22`  | `172.16.4.1`  | `172.16.32.10` |
+| `POOL_ANALYTICS` | `172.16.8.0/22`  | `172.16.8.1`  | `172.16.32.10` |
+| `POOL_AUDIT`     | `172.16.12.0/22` | `172.16.12.1` | `172.16.32.10` |
 
-```cisco
-show running-config | include ip routing
-```
-
-Esperado:
-
-```text
-ip routing
-```
-
-Sem o roteamento L3 ativo, as SVIs não desempenham a função de roteamento entre redes.
-
----
-
-# 📡 6. Problemas de DHCP
-
-## Sintoma
-
-O computador recebe endereço `169.254.x.x`, permanece sem configuração adequada ou não recebe um endereço dentro do pool esperado.
-
----
-
-## 6.1 Verificar os pools
-
-No HQ-Core:
+### Comandos
 
 ```cisco
 show ip dhcp pool
-```
-
-Devem existir:
-
-```text
-POOL_SEC_OPS
-POOL_FINANCIAL
-POOL_ANALYTICS
-POOL_AUDIT
-```
-
-No Branch-Core:
-
-```cisco
-show ip dhcp pool
-```
-
-Devem existir:
-
-```text
-POOL_RJ_SUPERVISAO
-POOL_RJ_OPERATIONS
-```
-
----
-
-## 6.2 Verificar bindings
-
-```cisco
 show ip dhcp binding
 ```
 
-Isso permite verificar os endereços entregues aos clientes.
+### Pontos de verificação
+
+| Verificação                    | Referência do projeto  |
+| :----------------------------- | :--------------------- |
+| Pool VLAN 10                   | `POOL_SEC_OPS`         |
+| Pool VLAN 20                   | `POOL_FINANCIAL`       |
+| Pool VLAN 30                   | `POOL_ANALYTICS`       |
+| Pool VLAN 40                   | `POOL_AUDIT`           |
+| Primeiros endereços reservados | `.1` até `.50`         |
+| Primeiro endereço dinâmico     | `.51`                  |
+| Gateway                        | SVI da respectiva VLAN |
+| DNS                            | `172.16.32.10`         |
 
 ---
 
-## 6.3 Verificar conflitos
+## 4.2 DHCP da Filial RJ
+
+### Pools
+
+| Pool                 | Rede            | Gateway      | DNS            |
+| :------------------- | :-------------- | :----------- | :------------- |
+| `POOL_RJ_SUPERVISAO` | `172.19.0.0/23` | `172.19.0.1` | `172.16.32.10` |
+| `POOL_RJ_OPERATIONS` | `172.19.2.0/23` | `172.19.2.1` | `172.16.32.10` |
+
+### Comandos
 
 ```cisco
-show ip dhcp conflict
+show ip dhcp pool
+show ip dhcp binding
 ```
 
-Caso existam conflitos, investigar o endereço indicado antes de prosseguir.
+### Pontos de verificação
+
+| Verificação                    | Referência do projeto |
+| :----------------------------- | :-------------------- |
+| Pool VLAN 10                   | `POOL_RJ_SUPERVISAO`  |
+| Pool VLAN 20                   | `POOL_RJ_OPERATIONS`  |
+| Primeiros endereços reservados | `.1` até `.50`        |
+| Primeiro endereço dinâmico     | `.51`                 |
+| Gateway VLAN 10                | `172.19.0.1`          |
+| Gateway VLAN 20                | `172.19.2.1`          |
+| DNS                            | `172.16.32.10`        |
+
+### Sintomas e isolamento
+
+| Sintoma                  | Verificação inicial                  |
+| :----------------------- | :----------------------------------- |
+| Host sem endereço IP     | VLAN da porta de acesso              |
+| IP fora da sub-rede      | Pool DHCP correspondente             |
+| Gateway incorreto        | `default-router` do pool             |
+| DNS incorreto            | `dns-server` do pool                 |
+| Nenhum lease             | `show ip dhcp binding`               |
+| Endereço abaixo de `.51` | Verificar `ip dhcp excluded-address` |
 
 ---
 
-## 6.4 Conferir exclusões
+# 🔀 5. Diagnóstico de Roteamento
 
-### HQ
+A arquitetura utiliza OSPFv2 internamente e eBGPv4 para integração com o CPD.
 
-Os primeiros 50 endereços de cada VLAN departamental são excluídos.
-
-Exemplo:
-
-```cisco
-show running-config | include excluded-address
-```
-
-Esperado:
+O modelo de roteamento é:
 
 ```text
-172.16.0.1 → 172.16.0.50
-172.16.4.1 → 172.16.4.50
-172.16.8.1 → 172.16.8.50
-172.16.12.1 → 172.16.12.50
-```
-
-### RJ
-
-```text
-172.19.0.1 → 172.19.0.50
-172.19.2.1 → 172.19.2.50
-```
-
----
-
-## 6.5 Verificar gateway e DNS
-
-Os pools devem entregar:
-
-```text
-Gateway → SVI da própria VLAN
-DNS     → 172.16.32.10
-```
-
-Exemplo:
-
-```text
-VLAN 20 HQ
-Gateway: 172.16.4.1
-DNS:     172.16.32.10
+Matriz / Filial
+AS 65001
+     │
+     │ OSPF Área 0
+     │
+HQ-Edge-RTR
+     │
+     │ eBGP TCP/179
+     │
+     ▼
+CPD-Datacenter-RTR
+AS 65002
 ```
 
 ---
 
-# 🛰️ 7. Problemas de OSPF
+## 5.1 Diagnóstico OSPFv2
 
-## Sintoma
+O OSPF opera no **processo 1**, utilizando a **Área 0**.
 
-Rotas internas não aparecem ou um caminho esperado não é estabelecido.
-
-### Primeiro comando:
+### Comando principal
 
 ```cisco
 show ip ospf neighbor
 ```
 
----
+### Resultado esperado
 
-## 7.1 Vizinho não aparece
-
-Verificar:
-
-```cisco
-show ip ospf neighbor
-```
-
-Depois:
-
-```cisco
-show ip ospf
-```
-
-E:
-
-```cisco
-show ip protocols
-```
-
-Conferir:
-
-* processo OSPF `1`;
-* Router ID;
-* área `0`;
-* redes incluídas no processo;
-* interfaces que deveriam participar do OSPF.
-
----
-
-## 7.2 Verificar redes anunciadas
-
-```cisco
-show running-config | section router ospf
-```
-
-Comparar as declarações `network` com as redes do equipamento.
-
-### HQ-Core
+As adjacências participantes devem alcançar o estado:
 
 ```text
-172.16.0.0/22
-172.16.4.0/22
-172.16.8.0/22
-172.16.12.0/22
-172.16.99.0/24
-172.16.16.0/30
+FULL
 ```
 
-### Branch-Core
+### Router-IDs
 
-```text
-172.19.0.0/23
-172.19.2.0/23
-172.19.99.0/24
-172.19.4.0/30
-```
+| Equipamento        | Router-ID |
+| :----------------- | :-------- |
+| `HQ-Core-3650`     | `1.1.1.1` |
+| `HQ-Edge-RTR`      | `2.2.2.2` |
+| `Branch-Edge-RTR`  | `3.3.3.3` |
+| `Branch-Core-3650` | `4.4.4.4` |
 
----
-
-## 7.3 Verificar rotas OSPF
+### Outros comandos de diagnóstico
 
 ```cisco
-show ip route ospf
+show ip ospf interface
+show ip route
 ```
 
-As rotas aprendidas via OSPF devem aparecer identificadas por:
+### Pontos de verificação
+
+| Elemento    | Configuração     |
+| :---------- | :--------------- |
+| Processo    | `1`              |
+| Área        | `0`              |
+| Matriz      | OSPF             |
+| Filial RJ   | OSPF             |
+| Core SP     | OSPF             |
+| Core RJ     | OSPF             |
+| WAN 1       | `10.0.0.0/30`    |
+| Trânsito SP | `172.16.16.0/30` |
+| Trânsito RJ | `172.19.4.0/30`  |
+
+### Sintomas
+
+| Sintoma                    | Linha de investigação            |
+| :------------------------- | :------------------------------- |
+| Vizinho ausente            | Interface / endereço / rede OSPF |
+| Vizinho não chega a `FULL` | Adjacência OSPF                  |
+| Rota interna ausente       | Tabela OSPF / anúncio da rede    |
+| Core sem destino remoto    | OSPF + trânsito L3               |
+| WAN sem convergência       | Interface serial + OSPF          |
+
+---
+
+## 5.2 Diagnóstico do eBGP
+
+O peering externo ocorre entre:
 
 ```text
-O
+Matriz: AS 65001
+CPD:    AS 65002
 ```
 
----
+A sessão utiliza a WAN 3:
 
-## 7.4 Verificar Router ID
-
-```cisco
-show ip ospf
+```text
+10.0.0.8/30
 ```
 
-Router IDs definidos no cenário:
+### Endereços do peering
 
-| Equipamento      | Router ID |
-| :--------------- | :-------- |
-| HQ-Core-3650     | `1.1.1.1` |
-| HQ-Edge-RTR      | `2.2.2.2` |
-| Branch-Edge-RTR  | `3.3.3.3` |
-| Branch-Core-3650 | `4.4.4.4` |
+```text
+CPD-Datacenter-RTR
+10.0.0.9
+       │
+       │ TCP/179
+       │
+10.0.0.10
+HQ-Edge-RTR
+```
 
----
+### Comando principal
 
-# 🌎 8. Problemas de eBGP
-
-## Sintoma
-
-O CPD não é alcançável pela rota esperada ou os prefixos não aparecem na tabela BGP.
-
-### Primeiro comando:
-
-No HQ:
+No `HQ-Edge-RTR`:
 
 ```cisco
 show ip bgp summary
 ```
 
-No CPD:
+No `CPD-Datacenter-RTR`:
 
 ```cisco
 show ip bgp summary
 ```
 
----
-
-## 8.1 Conferir os ASNs
-
-| Local                     |   ASN   |
-| :------------------------ | :-----: |
-| HQ / ambiente corporativo | `65001` |
-| CPD                       | `65002` |
-
----
-
-## 8.2 Conferir o peer
-
-A sessão deve utilizar:
-
-```text
-HQ-Edge-RTR      10.0.0.10
-CPD-Datacenter   10.0.0.9
-```
-
-No HQ:
-
-```cisco
-show running-config | section router bgp
-```
-
-Conferir:
-
-```text
-neighbor 10.0.0.9 remote-as 65002
-```
-
-No CPD, conferir o vizinho correspondente:
-
-```cisco
-show running-config | section router bgp
-```
-
----
-
-## 8.3 Verificar conectividade antes do BGP
-
-Antes de investigar a sessão BGP, testar:
-
-```cisco
-ping 10.0.0.9
-```
-
-a partir do HQ-Edge-RTR.
-
-No CPD:
-
-```cisco
-ping 10.0.0.10
-```
-
-Se o endereço do vizinho não estiver alcançável, investigar o enlace WAN 3 antes de alterar o BGP.
-
----
-
-## 8.4 Verificar tabela BGP
+### Segundo comando
 
 ```cisco
 show ip bgp
 ```
 
-No CPD, conferir os prefixos anunciados pelo cenário:
+### Pontos de verificação
+
+| Elemento    | Referência    |
+| :---------- | :------------ |
+| AS Matriz   | `65001`       |
+| AS CPD      | `65002`       |
+| Vizinho HQ  | `10.0.0.9`    |
+| Vizinho CPD | `10.0.0.10`   |
+| Porta       | TCP `179`     |
+| WAN         | WAN 3         |
+| Rede WAN 3  | `10.0.0.8/30` |
+
+### Prefixos anunciados pelo CPD
+
+| Prefixo            | Origem            |
+| :----------------- | :---------------- |
+| `172.16.32.0/22`   | LAN de servidores |
+| `192.168.100.1/32` | Loopback 0        |
+| `10.0.0.4/30`      | WAN 2             |
+
+### Sintomas
+
+| Sintoma                          | Linha de investigação        |
+| :------------------------------- | :--------------------------- |
+| Sessão não estabelecida          | WAN 3 / endereços / vizinho  |
+| Sessão sem prefixos              | Configuração BGP             |
+| Prefixo CPD ausente              | `show ip bgp`                |
+| Rede corporativa ausente no CPD  | Redistribuição OSPF → BGP    |
+| Comunicação com servidor ausente | BGP → OSPF / tabela de rotas |
+
+---
+
+# 🔁 6. Diagnóstico da Redistribuição de Rotas
+
+O `HQ-Edge-RTR` é o ponto de integração entre OSPF e BGP.
 
 ```text
-172.16.32.0/22
-10.0.0.4/30
-192.168.100.1/32
+             HQ-Edge-RTR
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+   OSPF → BGP          BGP → OSPF
+        │                   │
+        ▼                   ▼
+ Redes Matriz          Redes CPD
+        │                   │
+        └─────────┬─────────┘
+                  │
+               WAN 3
+                  │
+                  ▼
+          CPD-Datacenter-RTR
 ```
 
----
+## 6.1 OSPF → BGP
 
-# 🔄 9. Problemas de Redistribuição
-
-A redistribuição ocorre no `HQ-Edge-RTR`.
-
----
-
-## 9.1 BGP → OSPF
-
-Verificar:
+A configuração do `HQ-Edge-RTR` utiliza:
 
 ```cisco
-show running-config | section router ospf
+router bgp 65001
+ neighbor 10.0.0.9 remote-as 65002
+ redistribute ospf 1
+exit
 ```
 
-Deve existir:
-
-```cisco
-redistribute bgp 65001 subnets
-```
-
-### Sintoma
-
-O BGP possui uma rota, mas os equipamentos internos não a conhecem.
-
-### Diagnóstico
-
-1. Verificar a rota no BGP:
+### Verificação
 
 ```cisco
 show ip bgp
+show ip route
 ```
 
-2. Verificar a tabela global:
+As redes corporativas aprendidas via OSPF devem estar disponíveis para o domínio BGP.
+
+---
+
+## 6.2 BGP → OSPF
+
+A configuração do `HQ-Edge-RTR` utiliza:
+
+```cisco
+router ospf 1
+ redistribute bgp 65001 subnets
+exit
+```
+
+### Verificação
 
 ```cisco
 show ip route
 ```
 
-3. Verificar rotas OSPF:
+As redes provenientes do CPD devem estar disponíveis no domínio OSPF.
 
-```cisco
-show ip route ospf
-```
-
-4. Conferir a redistribuição:
-
-```cisco
-show running-config | section router ospf
-```
-
----
-
-## 9.2 OSPF → BGP
-
-Verificar:
-
-```cisco
-show running-config | section router bgp
-```
-
-Deve existir:
-
-```cisco
-redistribute ospf 1
-```
-
-### Sintoma
-
-A rede corporativa é conhecida pelo OSPF, mas não aparece no domínio BGP.
-
-### Diagnóstico
-
-```cisco
-show ip route ospf
-```
-
-depois:
-
-```cisco
-show ip bgp
-```
-
-e:
-
-```cisco
-show running-config | section router bgp
-```
-
----
-
-# 🛣️ 10. Problemas com Rotas Estáticas Flutuantes
-
-O `Branch-Edge-RTR` utiliza rotas estáticas com:
+### Sintoma principal
 
 ```text
-Administrative Distance = 115
+BGP estabelecido
+        +
+prefixos recebidos
+        +
+rede ainda inacessível no Core
 ```
 
-enquanto o OSPF possui:
-
-```text
-Administrative Distance = 110
-```
-
-A intenção é manter as rotas estáticas como contingência, sendo preferidas somente quando a rota OSPF correspondente deixa de estar disponível.
+Nesse caso, a linha de investigação permanece na redistribuição entre os dois domínios.
 
 ---
 
-## 10.1 Verificar as rotas
+# 🧭 7. Diagnóstico das Rotas Estáticas Flutuantes
 
-```cisco
-show running-config | include ip route
+A Filial RJ não executa BGP diretamente.
+
+A contingência utiliza rotas estáticas com:
+
+```text
+AD 115
 ```
 
-Esperado no `Branch-Edge-RTR`:
+enquanto o OSPF utiliza:
+
+```text
+AD 110
+```
+
+As rotas configuradas no `Branch-Edge-RTR` são:
 
 ```cisco
 ip route 172.16.0.0 255.255.240.0 10.0.0.1 115
@@ -872,81 +574,157 @@ ip route 172.16.32.0 255.255.252.0 10.0.0.6 115
 ip route 192.168.100.1 255.255.255.255 10.0.0.6 115
 ```
 
----
-
-## 10.2 Verificar qual rota está instalada
+### Diagnóstico da tabela
 
 ```cisco
-show ip route 172.16.32.0
+show ip route
 ```
 
-ou:
+### Destinos de contingência
+
+| Destino            | Próximo salto | Finalidade                  |
+| :----------------- | :------------ | :-------------------------- |
+| `172.16.0.0/20`    | `10.0.0.1`    | Bloco corporativo da Matriz |
+| `172.16.99.0/24`   | `10.0.0.1`    | Gerência da Matriz          |
+| `172.16.32.0/22`   | `10.0.0.6`    | LAN do CPD                  |
+| `192.168.100.1/32` | `10.0.0.6`    | Loopback do CPD             |
+
+### Redistribuição local
+
+O `Branch-Edge-RTR` utiliza:
 
 ```cisco
-show ip route 192.168.100.1
+router ospf 1
+ redistribute static subnets
+exit
 ```
 
-A saída deve ser interpretada considerando a origem e a distância administrativa da rota instalada.
-
----
-
-## 10.3 Se a rota flutuante não assumir
-
-Verificar, nesta ordem:
-
-### 1. A rota está configurada?
-
-```cisco
-show running-config | include ip route
-```
-
-### 2. O próximo salto está alcançável?
-
-Para a rota do CPD:
-
-```cisco
-ping 10.0.0.6
-```
-
-### 3. A rota OSPF ainda está instalada?
-
-```cisco
-show ip route ospf
-```
-
-### 4. A rota estática possui AD 115?
-
-```cisco
-show ip route 172.16.32.0
-```
-
-### 5. As rotas estáticas estão sendo redistribuídas?
-
-```cisco
-show running-config | section router ospf
-```
-
-Conferir:
+O `Branch-Core-3650` possui rota padrão para:
 
 ```text
-redistribute static subnets
+172.19.4.2
 ```
 
+### Sintomas
+
+| Sintoma                                 | Investigação                             |
+| :-------------------------------------- | :--------------------------------------- |
+| Filial perde acesso ao CPD              | WAN 1 / WAN 2 / rotas AD 115             |
+| Core RJ não alcança destinos remotos    | Redistribuição das rotas estáticas       |
+| Rota flutuante não aparece              | `show ip route`                          |
+| Caminho de contingência não é utilizado | AD e disponibilidade do caminho primário |
+| Retorno do CPD não chega à Filial       | Rotas estáticas de retorno no CPD        |
+
 ---
 
-# 🔥 11. Troubleshooting do Failover WAN
+# 🚨 8. Diagnóstico de Falhas WAN
 
-## Sintoma
+A infraestrutura possui três enlaces seriais em topologia de anel.
 
-Após a falha do caminho primário, o `PC-RJ-Ops-01` perde completamente a comunicação com o `Server-Financial-Hub`.
+```text
+                    WAN 3
+             10.0.0.8/30
+          ┌─────────────────┐
+          │                 │
+          ▼                 │
+     MATRIZ SP ───────── CPD
+          │                 ▲
+          │                 │
+       WAN 1             WAN 2
+    10.0.0.0/30       10.0.0.4/30
+          │                 │
+          ▼                 │
+       FILIAL RJ ───────────┘
+```
+
+### Distribuição dos enlaces
+
+| WAN       | Enlace          | Ponta A              | Ponta B              |
+| :-------- | :-------------- | :------------------- | :------------------- |
+| **WAN 1** | Matriz ↔ Filial | `10.0.0.1` — HQ DCE  | `10.0.0.2` — RJ DTE  |
+| **WAN 2** | Filial ↔ CPD    | `10.0.0.5` — RJ DCE  | `10.0.0.6` — CPD DTE |
+| **WAN 3** | CPD ↔ Matriz    | `10.0.0.9` — CPD DCE | `10.0.0.10` — HQ DTE |
+
+### Interfaces
+
+| Equipamento          | Interface | Papel       |
+| :------------------- | :-------- | :---------- |
+| `HQ-Edge-RTR`        | `Se0/3/0` | WAN 1 — DCE |
+| `HQ-Edge-RTR`        | `Se0/3/1` | WAN 3 — DTE |
+| `Branch-Edge-RTR`    | `Se0/3/0` | WAN 2 — DCE |
+| `Branch-Edge-RTR`    | `Se0/3/1` | WAN 1 — DTE |
+| `CPD-Datacenter-RTR` | `Se0/3/0` | WAN 3 — DCE |
+| `CPD-Datacenter-RTR` | `Se0/3/1` | WAN 2 — DTE |
+
+### Comando inicial
+
+```cisco
+show ip interface brief
+```
+
+### Comandos complementares
+
+```cisco
+show ip route
+show ip ospf neighbor
+```
+
+### Clock rate
+
+As interfaces DCE utilizam:
+
+```cisco
+clock rate 64000
+```
+
+O padrão definido no projeto é:
+
+| Interface DCE                | Clock   |
+| :--------------------------- | :------ |
+| `HQ-Edge-RTR Se0/3/0`        | `64000` |
+| `Branch-Edge-RTR Se0/3/0`    | `64000` |
+| `CPD-Datacenter-RTR Se0/3/0` | `64000` |
 
 ---
 
-## 11.1 Confirmar o cenário nominal
+# 🔥 9. Diagnóstico do Failover WAN
+
+O cenário utiliza a Filial RJ como ponto de demonstração da contingência.
+
+### Caminho nominal
+
+```text
+PC-RJ-Ops-01
+172.19.2.51
+      │
+      ▼
+Branch-Access-2960
+      │
+      ▼
+Branch-Core-3650
+      │
+      ▼
+Branch-Edge-RTR
+      │
+      │ WAN 1
+      ▼
+HQ-Edge-RTR
+      │
+      │ WAN 3
+      ▼
+CPD-Datacenter-RTR
+      │
+      ▼
+Server-Financial-Hub
+172.16.32.10
+```
+
+### Teste de conectividade
 
 Origem:
 
 ```text
+PC-RJ-Ops-01
 172.19.2.51
 ```
 
@@ -956,793 +734,383 @@ Destino:
 172.16.32.10
 ```
 
-Executar:
+Comandos de diagnóstico:
 
 ```text
-ping 172.16.32.10 -t
-```
-
-Antes de provocar a falha, confirmar que a comunicação estava funcionando.
-
----
-
-## 11.2 Verificar o OSPF antes da falha
-
-No `Branch-Edge-RTR`:
-
-```cisco
-show ip ospf neighbor
-```
-
-Depois:
-
-```cisco
-show ip route 172.16.32.0
-```
-
-Registrar o caminho observado.
-
----
-
-## 11.3 Verificar a interface após a falha
-
-```cisco
-show ip interface brief
-```
-
-Confirmar qual interface foi desativada durante o teste.
-
----
-
-## 11.4 Verificar convergência
-
-```cisco
-show ip ospf neighbor
+ping 172.16.32.10
 ```
 
 e:
 
+```text
+tracert 172.16.32.10
+```
+
+### Condição de falha
+
+A perda do enlace primário entre RJ e Matriz corresponde à indisponibilidade da:
+
+```text
+Branch-Edge-RTR
+Se0/3/1
+```
+
+que representa a:
+
+```text
+WAN 1
+10.0.0.0/30
+```
+
+A WAN 2 permanece disponível:
+
+```text
+Branch-Edge-RTR
+10.0.0.5
+        │
+        │ WAN 2
+        │ 10.0.0.4/30
+        ▼
+CPD-Datacenter-RTR
+10.0.0.6
+```
+
+### Resultado esperado
+
+Durante a convergência:
+
+```text
+Perda transitória:
+1–2 pacotes ICMP
+```
+
+Após a convergência:
+
+```text
+WAN 1
+   X
+   │
+   │ falha
+   ▼
+
+WAN 2
+Branch ───────── CPD
+10.0.0.5        10.0.0.6
+```
+
+As rotas estáticas com **AD 115** passam a fornecer a contingência para os destinos configurados.
+
+---
+
+# 🧪 10. Matriz de Sintomas e Diagnóstico
+
+| Sintoma observado               | Primeira verificação    | Segunda verificação       | Domínio        |
+| :------------------------------ | :---------------------- | :------------------------ | :------------- |
+| PC sem IP                       | VLAN da porta           | DHCP Pool                 | L2 / DHCP      |
+| PC recebe IP incorreto          | Pool DHCP               | SVI                       | DHCP / L3      |
+| PC não alcança gateway          | VLAN / trunk            | SVI                       | L2 / L3        |
+| VLAN não atravessa uplink       | `show interfaces trunk` | `allowed vlan`            | Switching      |
+| Core não alcança roteador       | VLAN 200                | `show ip interface brief` | L3             |
+| OSPF sem vizinho                | Interfaces              | `show ip ospf neighbor`   | OSPF           |
+| OSPF não chega a `FULL`         | WAN / rede              | `show ip ospf interface`  | OSPF           |
+| BGP não estabelece              | WAN 3                   | `show ip bgp summary`     | eBGP           |
+| BGP estabelecido sem rotas      | BGP table               | Redistribuição            | BGP            |
+| CPD inacessível pela Matriz     | BGP                     | OSPF                      | Redistribuição |
+| CPD inacessível pela Filial     | WAN 1 / WAN 2           | AD 115                    | Resiliência    |
+| Gerência do switch indisponível | VLAN 99                 | Gateway                   | OOB            |
+| SSH indisponível                | IP de gerenciamento     | VTY / SSHv2               | Hardening      |
+
+---
+
+# 🧭 11. Fluxo de Diagnóstico por Camada
+
+```text
+                    ┌──────────────────────┐
+                    │ Falha de comunicação │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Interfaces operantes?│
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+                   NÃO                   SIM
+                    │                     │
+                    ▼                     ▼
+              Interface / WAN       VLAN / Trunk
+                                          │
+                                          ▼
+                                  SVI / Gateway / L3
+                                          │
+                                          ▼
+                                      DHCP
+                                          │
+                                          ▼
+                                        OSPF
+                                          │
+                                          ▼
+                                        eBGP
+                                          │
+                                          ▼
+                                  Redistribuição
+                                          │
+                                          ▼
+                                    WAN / Failover
+```
+
+O princípio do runbook é evitar saltar diretamente para a investigação de BGP ou OSPF quando o problema ainda pode estar localizado em interfaces, VLANs, trunks, SVIs ou DHCP.
+
+---
+
+# 🔐 12. Diagnóstico de Gerenciamento SSHv2
+
+Todos os **7 ativos gerenciáveis** possuem parâmetros de hardening definidos no cenário.
+
+### Parâmetros
+
+| Controle                | Configuração    |
+| :---------------------- | :-------------- |
+| Gerenciamento           | SSH             |
+| Telnet                  | Desativado      |
+| SSH                     | Versão 2        |
+| RSA                     | `2048` bits     |
+| Domínio                 | `ANBIMA.CORP`   |
+| Usuário                 | `admin`         |
+| Privilégio              | `15`            |
+| Autenticação            | Local           |
+| VTY                     | `0 4`           |
+| Timeout                 | `60` segundos   |
+| Tentativas              | `4`             |
+| Credencial privilegiada | `enable secret` |
+| Gerência                | VLAN `99`       |
+
+### Configuração-base
+
+```cisco
+ip domain-name ANBIMA.CORP
+crypto key generate rsa
+2048
+ip ssh version 2
+username admin privilege 15 secret ANBIMA@SEC2026!
+
+line vty 0 4
+ login local
+ transport input ssh
+ ip ssh time-out 60
+ ip ssh authentication-retries 4
+exit
+```
+
+### Diagnóstico
+
+Em caso de indisponibilidade do gerenciamento:
+
+```text
+1. Verificar endereço IP da VLAN 99
+2. Verificar gateway da VLAN 99
+3. Verificar conectividade L3
+4. Verificar configuração das linhas VTY
+5. Verificar SSHv2
+```
+
+### Endereços de gerenciamento
+
+| Equipamento          | VLAN | Endereço         |
+| :------------------- | :--- | :--------------- |
+| `HQ-Access-2960`     | `99` | `172.16.99.2/24` |
+| `Branch-Access-2960` | `99` | `172.19.99.2/24` |
+
+---
+
+# 📡 13. Diagnóstico de Endereçamento
+
+## Matriz SP
+
+| Elemento       | Endereço         |
+| :------------- | :--------------- |
+| Bloco agregado | `172.16.0.0/20`  |
+| VLAN 10        | `172.16.0.0/22`  |
+| VLAN 20        | `172.16.4.0/22`  |
+| VLAN 30        | `172.16.8.0/22`  |
+| VLAN 40        | `172.16.12.0/22` |
+| VLAN 99        | `172.16.99.0/24` |
+| VLAN 200       | `172.16.16.0/30` |
+
+## Filial RJ
+
+| Elemento       | Endereço         |
+| :------------- | :--------------- |
+| Bloco agregado | `172.19.0.0/22`  |
+| VLAN 10        | `172.19.0.0/23`  |
+| VLAN 20        | `172.19.2.0/23`  |
+| VLAN 99        | `172.19.99.0/24` |
+| VLAN 200       | `172.19.4.0/30`  |
+
+## CPD
+
+| Elemento             | Endereço           |
+| :------------------- | :----------------- |
+| LAN                  | `172.16.32.0/22`   |
+| Gateway              | `172.16.32.1`      |
+| Server-Financial-Hub | `172.16.32.10`     |
+| Loopback 0           | `192.168.100.1/32` |
+
+### Comando principal
+
 ```cisco
 show ip route
 ```
 
-Depois:
-
-```cisco
-show ip route 172.16.32.0
-```
-
-O objetivo é confirmar a mudança da origem da rota conforme o cenário de contingência.
+A análise deve verificar se o destino procurado aparece na tabela e por qual mecanismo de roteamento ele foi aprendido.
 
 ---
 
-## 11.5 Se o tráfego não retornar
+# 🧪 14. Sequência Consolidada de Troubleshooting
 
-Investigar:
+A sequência de investigação utilizada como referência para a infraestrutura é:
 
 ```text
-1. Interface WAN 2
-        ↓
-2. Próximo salto 10.0.0.6
-        ↓
-3. Rota estática AD 115
-        ↓
-4. Redistribuição static → OSPF
-        ↓
-5. Rota default do Branch-Core
-        ↓
-6. Conectividade até 172.16.32.10
-```
-
-Testes:
-
-```cisco
-ping 10.0.0.6
-```
-
-```cisco
-show ip route 172.16.32.0
-```
-
-```cisco
-show running-config | include ip route
-```
-
-```cisco
-show running-config | section router ospf
+01 ── Identificar origem e destino da falha
+      │
+02 ── Verificar interfaces e enlaces
+      │
+03 ── Verificar VLANs e portas de acesso
+      │
+04 ── Verificar trunks 802.1Q
+      │
+05 ── Verificar SVIs e VLAN 200
+      │
+06 ── Verificar DHCP
+      │
+07 ── Verificar tabela de roteamento
+      │
+08 ── Verificar OSPF
+      │
+09 ── Verificar eBGP
+      │
+10 ── Verificar redistribuição OSPF ↔ BGP
+      │
+11 ── Verificar rotas estáticas AD 115
+      │
+12 ── Verificar WAN 1 / WAN 2 / WAN 3
+      │
+13 ── Confirmar conectividade ponta a ponta
 ```
 
 ---
 
-# 🖥️ 12. Problemas entre Core e Edge
+# ✅ 15. Critérios de Encerramento do Diagnóstico
 
-## Sintoma
+O incidente pode ser considerado isolado quando a cadeia correspondente estiver operacional novamente:
 
-As VLANs funcionam localmente, mas a filial não consegue alcançar redes externas à sua LAN.
+| Domínio            | Condição                                                                  |
+| :----------------- | :------------------------------------------------------------------------ |
+| **Interfaces**     | Enlaces necessários operacionalmente disponíveis                          |
+| **VLANs**          | VLAN correta associada às portas                                          |
+| **Trunks**         | VLANs homologadas transportadas                                           |
+| **SVIs**           | Gateways correspondentes disponíveis                                      |
+| **DHCP**           | Endereçamento dinâmico conforme o projeto                                 |
+| **OSPF**           | Adjacências em `FULL`                                                     |
+| **eBGP**           | Sessão entre AS `65001` e AS `65002` estabelecida                         |
+| **Redistribuição** | Rotas disponíveis entre os domínios OSPF e BGP                            |
+| **WAN**            | Caminho correspondente disponível                                         |
+| **Failover**       | Rotas AD `115` disponíveis quando o caminho primário estiver indisponível |
+| **CPD**            | `172.16.32.10` alcançável pelos caminhos previstos                        |
+| **Gerenciamento**  | VLAN `99` e SSHv2 disponíveis nos switches de acesso                      |
 
-### Branch-Core
+---
 
-Verificar:
+# 📁 16. Referência Rápida de Comandos
+
+## Interfaces
 
 ```cisco
 show ip interface brief
 ```
 
-Conferir:
-
-```text
-Vlan200 → 172.19.4.1/30
-```
-
-### Branch-Edge
-
-Conferir:
-
-```text
-Gig0/0 → 172.19.4.2/30
-```
-
-Testar:
-
-```cisco
-ping 172.19.4.2
-```
-
-a partir do Core.
-
-No roteador:
-
-```cisco
-ping 172.19.4.1
-```
-
----
-
-## 12.1 Verificar default route do Branch-Core
-
-```cisco
-show running-config | include ip route
-```
-
-Esperado:
-
-```cisco
-ip route 0.0.0.0 0.0.0.0 172.19.4.2
-```
-
----
-
-# 🔐 13. Problemas de SSH
-
-## Sintoma
-
-O gerenciamento remoto não funciona.
-
-### Verificar:
-
-```cisco
-show ip ssh
-```
-
----
-
-## 13.1 Verificar domínio
-
-```cisco
-show running-config | include ip domain-name
-```
-
-Esperado:
-
-```text
-ip domain-name anbima.corp
-```
-
----
-
-## 13.2 Verificar RSA
-
-```cisco
-show crypto key mypubkey rsa
-```
-
-A configuração do cenário utiliza chave RSA de:
-
-```text
-2048 bits
-```
-
----
-
-## 13.3 Verificar VTY
-
-```cisco
-show running-config | section line vty
-```
-
-Conferir:
-
-```text
-login local
-transport input ssh
-ip ssh time-out 60
-ip ssh authentication-retries 4
-```
-
----
-
-## 13.4 Verificar usuário
-
-```cisco
-show running-config | include username
-```
-
-O usuário configurado no cenário é:
-
-```text
-ADMIN
-```
-
-com:
-
-```text
-privilege 15
-```
-
----
-
-# 🧪 14. Troubleshooting por Sintoma
-
-## ❌ “PC não recebe IP”
-
-Seguir:
-
-```text
-PC
- ↓
-Porta Access
- ↓
-VLAN
- ↓
-Trunk
- ↓
-SVI
- ↓
-DHCP Pool
-```
-
-Comandos:
+## VLANs
 
 ```cisco
 show vlan brief
+```
+
+## Trunks
+
+```cisco
 show interfaces trunk
-show ip interface brief
+```
+
+## OSPF
+
+```cisco
+show ip ospf neighbor
+show ip ospf interface
+```
+
+## BGP
+
+```cisco
+show ip bgp summary
+show ip bgp
+```
+
+## Roteamento
+
+```cisco
+show ip route
+```
+
+## DHCP
+
+```cisco
 show ip dhcp pool
 show ip dhcp binding
 ```
 
----
-
-## ❌ “PC recebe IP, mas não pinga o gateway”
-
-Seguir:
+## Conectividade
 
 ```text
-PC
- ↓
-Porta Access
- ↓
-VLAN correta
- ↓
-Trunk
- ↓
-SVI
-```
-
-Comandos:
-
-```cisco
-show vlan brief
-show interfaces trunk
-show ip interface brief
+ping <endereço-destino>
+tracert <endereço-destino>
 ```
 
 ---
 
-## ❌ “Gateway funciona, mas outra rede não”
-
-Seguir:
+## 📌 17. Referência Operacional da Infraestrutura
 
 ```text
-SVI
- ↓
-ip routing
- ↓
-Tabela de rotas
- ↓
-OSPF
+                    ┌─────────────────────────┐
+                    │       CPD ANBIMA        │
+                    │       AS 65002          │
+                    │ CPD-Datacenter-RTR      │
+                    │ 172.16.32.1             │
+                    └───────────┬─────────────┘
+                                │
+                           WAN 2 / WAN 3
+                                │
+               ┌────────────────┴────────────────┐
+               │                                 │
+        ┌──────▼───────┐                  ┌──────▼───────┐
+        │   MATRIZ SP  │                  │ FILIAL RJ    │
+        │   AS 65001   │                  │   AS 65001   │
+        │ HQ-Edge-RTR  │────── WAN 1 ────│Branch-Edge   │
+        └──────┬───────┘                  └──────┬───────┘
+               │                                  │
+          VLAN 200                           VLAN 200
+               │                                  │
+        ┌──────▼───────┐                  ┌──────▼───────┐
+        │ HQ-Core-3650 │                  │Branch-Core   │
+        │ 4 SVIs / DHCP│                  │2 SVIs / DHCP │
+        └──────┬───────┘                  └──────┬───────┘
+               │                                  │
+             Trunk                              Trunk
+               │                                  │
+        ┌──────▼───────┐                  ┌──────▼───────┐
+        │HQ-Access-2960│                  │Branch-Access │
+        │ VLAN 10-40   │                  │ VLAN 10 / 20 │
+        └──────────────┘                  └──────────────┘
 ```
 
-Comandos:
-
-```cisco
-show ip interface brief
-show running-config | include ip routing
-show ip route
-show ip route ospf
-show ip ospf neighbor
-```
-
----
-
-## ❌ “RJ não alcança CPD”
-
-Seguir:
-
-```text
-RJ Core
- ↓
-RJ Edge
- ↓
-WAN 1 / WAN 2
- ↓
-CPD
- ↓
-172.16.32.10
-```
-
-Comandos:
-
-```cisco
-show ip route
-show ip ospf neighbor
-show ip route 172.16.32.0
-ping 10.0.0.6
-ping 172.16.32.10
-```
-
----
-
-## ❌ “HQ não alcança CPD”
-
-Seguir:
-
-```text
-HQ-Edge
- ↓
-WAN 3
- ↓
-CPD
- ↓
-eBGP
- ↓
-172.16.32.0/22
-```
-
-Comandos:
-
-```cisco
-ping 10.0.0.9
-show ip bgp summary
-show ip bgp
-show ip route 172.16.32.0
-```
-
----
-
-## ❌ “eBGP não estabelece”
-
-Seguir:
-
-```text
-Interface WAN 3
- ↓
-IP 10.0.0.10 / 10.0.0.9
- ↓
-Ping
- ↓
-ASN
- ↓
-Neighbor
- ↓
-BGP
-```
-
-Comandos:
-
-```cisco
-show ip interface brief
-ping 10.0.0.9
-show running-config | section router bgp
-show ip bgp summary
-```
-
----
-
-## ❌ “Rota do CPD existe no BGP, mas não chega ao Core”
-
-Seguir:
-
-```text
-CPD
- ↓
-eBGP
- ↓
-HQ-Edge
- ↓
-BGP → OSPF
- ↓
-HQ-Core
-```
-
-Comandos:
-
-```cisco
-show ip bgp
-show ip route
-show running-config | section router ospf
-show ip route ospf
-```
-
-Conferir:
-
-```text
-redistribute bgp 65001 subnets
-```
-
----
-
-## ❌ “Failover não funciona”
-
-Seguir:
-
-```text
-Falha WAN
- ↓
-OSPF perde caminho
- ↓
-Rota AD 115
- ↓
-Próximo salto
- ↓
-Redistribuição
- ↓
-Branch-Core
- ↓
-CPD
-```
-
-Comandos:
-
-```cisco
-show ip ospf neighbor
-show ip route
-show ip route 172.16.32.0
-show running-config | include ip route
-show running-config | section router ospf
-```
-
----
-
-# 🧰 15. Procedimento de Diagnóstico em 10 Passos
-
-Quando não souber exatamente onde está o problema, executar a sequência abaixo.
-
-### 01 — Interface
-
-```cisco
-show ip interface brief
-```
-
-### 02 — VLAN
-
-```cisco
-show vlan brief
-```
-
-### 03 — Trunk
-
-```cisco
-show interfaces trunk
-```
-
-### 04 — Routing L3
-
-```cisco
-show ip route
-```
-
-### 05 — DHCP
-
-```cisco
-show ip dhcp binding
-```
-
-### 06 — OSPF
-
-```cisco
-show ip ospf neighbor
-```
-
-### 07 — Rotas OSPF
-
-```cisco
-show ip route ospf
-```
-
-### 08 — BGP
-
-```cisco
-show ip bgp summary
-```
-
-### 09 — Prefixo específico
-
-```cisco
-show ip route <rede-ou-host>
-```
-
-### 10 — Teste fim a fim
-
-```cisco
-ping <destino>
-```
-
-Se necessário:
-
-```cisco
-traceroute <destino>
-```
-
----
-
-# 📋 16. Tabela de Diagnóstico Rápido
-
-| Sintoma                     | Primeiro comando          | Próximo ponto                    |
-| :-------------------------- | :------------------------ | :------------------------------- |
-| Interface não funciona      | `show ip interface brief` | Interface / cabo / `no shutdown` |
-| VLAN não funciona           | `show vlan brief`         | VLAN / porta                     |
-| VLAN não atravessa switches | `show interfaces trunk`   | Trunk / VLAN permitida           |
-| PC sem IP                   | `show ip dhcp pool`       | DHCP / VLAN / SVI                |
-| Gateway inacessível         | `show ip interface brief` | SVI / VLAN                       |
-| Rede remota inacessível     | `show ip route`           | OSPF / rota                      |
-| Vizinho OSPF ausente        | `show ip ospf neighbor`   | Interface / network / OSPF       |
-| Rota OSPF ausente           | `show ip route ospf`      | Anúncio / adjacência             |
-| eBGP não sobe               | `show ip bgp summary`     | WAN 3 / IP / ASN / neighbor      |
-| Prefixo BGP ausente         | `show ip bgp`             | Anúncio / redistribuição         |
-| Redistribuição não funciona | `show running-config`     | OSPF / BGP                       |
-| Failover não assume         | `show ip route <prefixo>` | AD 115 / próximo salto           |
-| SSH não conecta             | `show ip ssh`             | RSA / VTY / usuário              |
-
----
-
-# 📝 17. Registro de Incidente
-
-Para cada problema encontrado durante o laboratório, registrar:
-
-```text
-Data:
-Dispositivo:
-Origem:
-Destino:
-Sintoma:
-Comando utilizado:
-Resultado observado:
-Causa identificada:
-Alteração realizada:
-Comando de validação:
-Resultado após correção:
-```
-
----
-
-## Exemplo de registro
-
-```text
-Dispositivo:
-Branch-Edge-RTR
-
-Origem:
-PC-RJ-Ops-01 — 172.19.2.51
-
-Destino:
-Server-Financial-Hub — 172.16.32.10
-
-Sintoma:
-Perda de conectividade após alteração do estado de uma interface WAN.
-
-Comando utilizado:
-show ip route 172.16.32.0
-
-Resultado observado:
-Rota instalada diferente do estado nominal.
-
-Causa identificada:
-[preencher após diagnóstico]
-
-Alteração realizada:
-[preencher]
-
-Comando de validação:
-ping 172.16.32.10
-
-Resultado após correção:
-[preencher]
-```
-
----
-
-# ⚠️ 18. Boas Práticas Durante o Troubleshooting
-
-### 1. Não alterar várias coisas simultaneamente
-
-Se três configurações forem alteradas ao mesmo tempo, fica difícil determinar qual alteração resolveu ou criou o problema.
-
----
-
-### 2. Registrar o estado antes da alteração
-
-Sempre que possível:
-
-```cisco
-show ip interface brief
-show ip route
-show ip ospf neighbor
-show ip bgp summary
-```
-
-antes de modificar a configuração.
-
----
-
-### 3. Trabalhar do local para o remoto
-
-A sequência recomendada é:
-
-```text
-Interface
-   ↓
-VLAN
-   ↓
-Trunk
-   ↓
-SVI
-   ↓
-Gateway
-   ↓
-Roteamento
-   ↓
-WAN
-   ↓
-Destino
-```
-
----
-
-### 4. Testar depois de cada correção
-
-Depois de corrigir um componente:
-
-```text
-Teste local
-   ↓
-Teste de gateway
-   ↓
-Teste de rede remota
-   ↓
-Teste fim a fim
-```
-
----
-
-### 5. Não remover uma configuração sem entender sua função
-
-Isso é especialmente importante para:
-
-* OSPF;
-* redistribuição;
-* rotas estáticas com AD 115;
-* eBGP;
-* VLAN 200;
-* VLAN 99;
-* default route do Branch-Core.
-
-Esses elementos possuem funções específicas na arquitetura do cenário.
-
----
-
-# 🧭 19. Fluxo Geral de Isolamento
-
-```text
-                    PROBLEMA
-                       │
-                       ▼
-             ┌───────────────────┐
-             │ Interface UP/UP?  │
-             └─────────┬─────────┘
-                       │
-                 NÃO ──┴── SIM
-                 │          │
-                 ▼          ▼
-             L1 / L2     VLAN correta?
-                            │
-                      NÃO ──┴── SIM
-                      │          │
-                      ▼          ▼
-                   VLAN/L2     Trunk?
-                                  │
-                            NÃO ──┴── SIM
-                            │          │
-                            ▼          ▼
-                         Trunk      SVI/Gateway?
-                                      │
-                                NÃO ──┴── SIM
-                                │          │
-                                ▼          ▼
-                              L3       DHCP?
-                                           │
-                                     NÃO ──┴── SIM
-                                     │          │
-                                     ▼          ▼
-                                   DHCP      OSPF?
-                                                │
-                                          NÃO ──┴── SIM
-                                          │          │
-                                          ▼          ▼
-                                        OSPF       BGP?
-                                                     │
-                                               NÃO ──┴── SIM
-                                               │          │
-                                               ▼          ▼
-                                             eBGP    Redistribuição?
-                                                            │
-                                                      NÃO ──┴── SIM
-                                                      │          │
-                                                      ▼          ▼
-                                                   Routing    Teste fim a fim
-```
-
----
-
-# 🏁 20. Critério de Encerramento
-
-Um incidente de troubleshooting deve ser considerado encerrado somente após:
-
-* [ ] causa do problema identificada;
-* [ ] alteração realizada, quando necessária;
-* [ ] comportamento esperado restaurado;
-* [ ] teste de conectividade executado;
-* [ ] protocolo afetado validado;
-* [ ] configuração conferida;
-* [ ] resultado registrado;
-* [ ] evidência capturada, quando aplicável.
-
-A correção não deve ser considerada concluída apenas porque um único `ping` respondeu.
-
-O objetivo é confirmar que o **componente corrigido e os mecanismos dependentes continuam funcionando em conjunto**.
-
----
-
-## 📁 Evidências Relacionadas
-
-As evidências visuais dos testes devem permanecer organizadas em:
-
-```text
-assets/evidences/
-```
-
-com destaque para:
-
-```text
-ev-01-ospf-adjacency.png
-ev-02-ebgp-peering-established.png
-ev-03-dhcp-core-pools.png
-ev-04-wan-failover-convergence.png
-ev-05-hardening-sshv2.png
-```
-
----
-
-> **PROJETO ANIBIA**
-> *Troubleshooting Runbook — Cisco Packet Tracer*
-> *Diagnóstico, isolamento e validação de falhas da infraestrutura de rede.*
+Este runbook concentra a lógica de diagnóstico da infraestrutura documentada no projeto, permitindo correlacionar **sintomas**, **camadas**, **comandos de verificação**, **endereçamento**, **protocolos de roteamento** e **mecanismos de contingência** sem alterar a arquitetura definida no cenário.
