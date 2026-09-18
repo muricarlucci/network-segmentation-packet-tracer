@@ -1,1084 +1,631 @@
-# 🔄 Roteamento e Resiliência
+# Routing and Resilience — ANBIMA Financial Hub
 
-> **PROJETO ANIBIA — Infraestrutura de Redes Corporativa Simulada**
->
-> Documentação dos protocolos de roteamento, domínios OSPF e BGP, redistribuição entre protocolos, malha WAN em anel, rotas estáticas flutuantes e mecanismo de contingência da Filial RJ.
+[![Routing: OSPFv2](https://img.shields.io/badge/Routing-OSPFv2-blue)](#-1-roteamento-interno-ospfv2)
+[![External Routing: eBGPv4](https://img.shields.io/badge/External%20Routing-eBGPv4-orange)](#-2-roteamento-exterior-ebgpv4)
+[![Autonomous Systems: AS 65001 ↔ 65002](https://img.shields.io/badge/AS-65001%20%E2%86%94%2065002-purple)](#-2-roteamento-exterior-ebgpv4)
+[![Resilience: WAN Ring](https://img.shields.io/badge/Resilience-WAN%20Ring-green)](#-4-malha-wan-serial-em-anel)
 
----
+Documentação da arquitetura de roteamento e dos mecanismos de resiliência da infraestrutura corporativa simulada da ANBIMA. O projeto utiliza um modelo híbrido multidomínio, combinando **OSPFv2 como IGP interno**, **eBGPv4 como EGP entre os Sistemas Autônomos** e **rotas estáticas flutuantes** como mecanismo adicional de contingência.
 
-## 📌 Visão Geral
-
-O PROJETO ANIBIA utiliza uma arquitetura de **roteamento híbrido**, combinando:
-
-* **OSPFv2** como protocolo de roteamento interno;
-* **eBGPv4** para a comunicação entre o ambiente corporativo e o CPD;
-* **redistribuição OSPF ↔ BGP** no roteador de borda da Matriz;
-* **rotas estáticas flutuantes com AD 115** como mecanismo de contingência para a Filial RJ;
-* **WAN em topologia de anel**, formada por três enlaces seriais `/30`.
-
-A arquitetura separa o roteamento interno do roteamento entre Sistemas Autônomos, utilizando o `HQ-Edge-RTR` como principal ponto de integração entre os domínios de roteamento.
-
-```text
-┌───────────────────────────────────────────────────────────────┐
-│                    ROTEAMENTO ANIBIA                          │
-├───────────────────────────────────────────────────────────────┤
-│                                                               │
-│  OSPFv2                  eBGPv4                Contingência   │
-│  Área 0                  AS 65001 ↔ AS 65002  AD 115         │
-│     │                         │                    │           │
-│     └──────────┐    ┌─────────┘                    │           │
-│                ▼    ▼                              ▼           │
-│             HQ-Edge-RTR                    Branch-Edge-RTR    │
-│                │                                            │
-│                └────── Redistribuição ──────┐               │
-│                                             ▼               │
-│                                          WAN em anel        │
-│                                                               │
-└───────────────────────────────────────────────────────────────┘
-```
+A infraestrutura WAN é organizada em uma topologia de **anel fechado**, conectando Matriz SP, Filial Regional RJ e Datacenter/CPD. Essa estrutura permite utilizar caminhos alternativos quando o enlace primário entre a Matriz e a Filial sofre interrupção.
 
 ---
 
-# 🌐 1. Topologia WAN
+# 🔀 1. Roteamento Interno — OSPFv2
 
-A infraestrutura WAN é organizada em um **anel fechado de três localidades**:
+O protocolo **OSPFv2** é utilizado como protocolo de roteamento interno da infraestrutura, operando na **Área 0 (Backbone)**.
 
-```mermaid
-flowchart LR
-    HQ["🇧🇷 Matriz SP<br/>HQ-Edge-RTR<br/>AS 65001"]
-    RJ["🇧🇷 Filial RJ<br/>Branch-Edge-RTR<br/>AS 65001"]
-    CPD["🗄️ CPD Regulatório<br/>CPD-Datacenter-RTR<br/>AS 65002"]
+O protocolo é executado nos **Roteadores de Borda** e nos **Switches Core** da Matriz e da Filial Regional RJ.
 
-    HQ <-->|"WAN 1<br/>10.0.0.0/30"| RJ
-    RJ <-->|"WAN 2<br/>10.0.0.4/30"| CPD
-    CPD <-->|"WAN 3<br/>10.0.0.8/30"| HQ
-```
+### Características documentadas
 
-Os três enlaces são:
+| Característica | Implementação                                  |
+| :------------- | :--------------------------------------------- |
+| Protocolo      | OSPFv2                                         |
+| Área           | Area 0                                         |
+| Algoritmo      | Shortest Path First (Dijkstra)                 |
+| Métrica        | Custo associado à largura de banda dos enlaces |
+| Matriz         | HQ-Edge-RTR + HQ-Core-3650                     |
+| Filial RJ      | Branch-Edge-RTR + Branch-Core-3650             |
+| Processo OSPF  | `1`                                            |
 
-| Enlace    | Origem    | Destino   | Rede          |
-| --------- | --------- | --------- | ------------- |
-| **WAN 1** | Matriz SP | Filial RJ | `10.0.0.0/30` |
-| **WAN 2** | Filial RJ | CPD       | `10.0.0.4/30` |
-| **WAN 3** | CPD       | Matriz SP | `10.0.0.8/30` |
-
-Essa estrutura fornece dois caminhos físicos possíveis entre a Filial e os demais pontos da infraestrutura.
+O objetivo do OSPF é permitir que os equipamentos internos conheçam as redes corporativas sem depender do protocolo BGP dentro dos switches Core.
 
 ---
 
-# 🔌 2. Interfaces WAN e Papel DCE/DTE
+## 🆔 1.1 Router IDs
 
-O projeto utiliza módulos seriais nos roteadores e estabelece uma distribuição específica de interfaces DCE e DTE.
+Cada equipamento participante do OSPF possui um identificador próprio:
 
-## WAN 1
-
-```text
-HQ-Edge-RTR
-Se0/3/0 — DCE
-10.0.0.1/30
-      │
-      │ WAN 1
-      │
-10.0.0.2/30
-Se0/3/1 — DTE
-Branch-Edge-RTR
-```
-
-O lado DCE da Matriz utiliza:
-
-```cisco
-clock rate 64000
-```
+| Equipamento          | Router ID |
+| :------------------- | :-------- |
+| **HQ-Core-3650**     | `1.1.1.1` |
+| **HQ-Edge-RTR**      | `2.2.2.2` |
+| **Branch-Edge-RTR**  | `3.3.3.3` |
+| **Branch-Core-3650** | `4.4.4.4` |
 
 ---
 
-## WAN 2
+## 🧮 1.2 Wildcard Masks utilizadas
 
-```text
-Branch-Edge-RTR
-Se0/3/0 — DCE
-10.0.0.5/30
-      │
-      │ WAN 2
-      │
-10.0.0.6/30
-Se0/3/1 — DTE
-CPD-Datacenter-RTR
-```
+As redes anunciadas pelo OSPF utilizam máscaras coringa correspondentes aos respectivos prefixos:
 
-O lado DCE da Filial utiliza:
-
-```cisco
-clock rate 64000
-```
-
----
-
-## WAN 3
-
-```text
-CPD-Datacenter-RTR
-Se0/3/0 — DCE
-10.0.0.9/30
-      │
-      │ WAN 3
-      │
-10.0.0.10/30
-Se0/3/1 — DTE
-HQ-Edge-RTR
-```
-
-O lado DCE do CPD utiliza:
-
-```cisco
-clock rate 64000
-```
-
----
-
-# 🧭 3. OSPFv2 — Roteamento Interno
-
-O **OSPFv2** é utilizado como protocolo de roteamento interno da infraestrutura corporativa.
-
-O domínio OSPF utiliza:
-
-```text
-Process ID: 1
-Área:       0
-```
-
-A Área 0 funciona como backbone do domínio OSPF.
-
-O protocolo participa do roteamento entre:
-
-* Core da Matriz;
-* Edge da Matriz;
-* Core da Filial;
-* Edge da Filial;
-* enlaces necessários da infraestrutura WAN.
-
----
-
-## 3.1. Wildcard Masks
-
-O cenário utiliza as seguintes máscaras coringa:
-
-| Prefixo | Máscara           | Wildcard    |
-| ------- | ----------------- | ----------- |
+| Prefixo | Máscara Decimal   | Wildcard    |
+| :------ | :---------------- | :---------- |
 | `/22`   | `255.255.252.0`   | `0.0.3.255` |
 | `/23`   | `255.255.254.0`   | `0.0.1.255` |
 | `/24`   | `255.255.255.0`   | `0.0.0.255` |
 | `/30`   | `255.255.255.252` | `0.0.0.3`   |
 
-Essas máscaras são utilizadas nas declarações `network` do OSPF.
+---
+
+# 🏢 1.3 OSPF na Matriz SP
+
+O `HQ-Core-3650` participa do OSPF anunciando as redes internas da Matriz e o enlace de trânsito L3 com o roteador de borda.
+
+### Redes anunciadas pelo HQ-Core-3650
+
+```text
+172.16.0.0 0.0.3.255 area 0
+172.16.4.0 0.0.3.255 area 0
+172.16.8.0 0.0.3.255 area 0
+172.16.12.0 0.0.3.255 area 0
+172.16.99.0 0.0.0.255 area 0
+172.16.16.0 0.0.0.3 area 0
+```
+
+O `HQ-Edge-RTR` participa do mesmo processo OSPF e anuncia:
+
+```text
+172.16.16.0 0.0.0.3 area 0
+10.0.0.0 0.0.0.3 area 0
+```
+
+Além disso, o roteador de borda realiza a redistribuição das rotas BGP para dentro do OSPF.
 
 ---
 
-# 🏢 4. OSPF na Matriz
+# 🏢 1.4 OSPF na Filial Regional RJ
 
-O `HQ-Core-3650` participa do OSPF com as redes internas da Matriz e o enlace de trânsito L3.
+O `Branch-Core-3650` anuncia suas redes locais e o enlace de trânsito L3 com o roteador regional.
 
-O `HQ-Edge-RTR` também participa do OSPF.
-
-O enlace entre os dois utiliza:
+### Redes anunciadas pelo Branch-Core-3650
 
 ```text
-172.16.16.0/30
+172.19.0.0 0.0.1.255 area 0
+172.19.2.0 0.0.1.255 area 0
+172.19.99.0 0.0.0.255 area 0
+172.19.4.0 0.0.0.3 area 0
 ```
 
-com:
+O `Branch-Edge-RTR` participa do OSPF através das redes:
 
 ```text
-HQ-Core-3650 → 172.16.16.1
-HQ-Edge-RTR   → 172.16.16.2
+172.19.4.0 0.0.0.3 area 0
+10.0.0.0 0.0.0.3 area 0
+10.0.0.4 0.0.0.3 area 0
 ```
 
-O `HQ-Edge-RTR` utiliza o seguinte Router ID:
-
-```text
-2.2.2.2
-```
+O roteador regional também redistribui suas rotas estáticas para o OSPF.
 
 ---
 
-# 🏢 5. OSPF na Filial RJ
+# 🌐 2. Roteamento Exterior — eBGPv4
 
-O `Branch-Core-3650` participa do OSPF juntamente com o `Branch-Edge-RTR`.
-
-O enlace de trânsito L3 utiliza:
+O projeto utiliza **eBGPv4** para estabelecer a comunicação entre os dois Sistemas Autônomos presentes na arquitetura.
 
 ```text
-172.19.4.0/30
+┌─────────────────────────────────────┐
+│ Sistema Autônomo ANBIMA             │
+│ AS 65001                             │
+│                                     │
+│ Matriz SP + Filial RJ               │
+└──────────────────┬──────────────────┘
+                   │
+                   │ eBGP
+                   │ TCP/179
+                   │
+┌──────────────────▼──────────────────┐
+│ Datacenter / CPD                     │
+│ AS 65002                             │
+└─────────────────────────────────────┘
 ```
 
-com:
+### Divisão dos Sistemas Autônomos
 
-```text
-Branch-Core-3650 → 172.19.4.1
-Branch-Edge-RTR  → 172.19.4.2
-```
-
-O Router ID do Core RJ é:
-
-```text
-4.4.4.4
-```
-
-O domínio OSPF da Filial anuncia as redes regionais e o enlace de trânsito.
+| Sistema Autônomo | Ambiente                           |
+| :--------------- | :--------------------------------- |
+| **AS 65001**     | Matriz ANBIMA + Filial Regional RJ |
+| **AS 65002**     | Datacenter de Contingência / CPD   |
 
 ---
 
-# 📡 6. OSPF e a Malha WAN
+# 🔗 2.1 Sessão eBGP entre Matriz e CPD
 
-A utilização do OSPF permite que os roteadores conheçam os caminhos disponíveis dentro do domínio interno.
+O peering externo ocorre através da **WAN 3**, diretamente entre:
 
-Em condições normais, o tráfego da Filial destinado ao CPD utiliza o caminho:
+| Equipamento            | Interface | Endereço    | AS      |
+| :--------------------- | :-------- | :---------- | :------ |
+| **HQ-Edge-RTR**        | `Se0/3/1` | `10.0.0.10` | `65001` |
+| **CPD-Datacenter-RTR** | `Se0/3/0` | `10.0.0.9`  | `65002` |
 
-```text
-Filial RJ
-    │
-    │ WAN 1
-    ▼
-Matriz SP
-    │
-    │ WAN 3
-    ▼
-CPD
-```
+A sessão eBGP utiliza **TCP na porta 179**.
 
-Representação:
+No `HQ-Edge-RTR`:
 
 ```text
-PC-RJ
-  │
-  ▼
-Branch-Core
-  │
-  ▼
-Branch-Edge
-  │
-  │ WAN 1
-  ▼
-HQ-Edge
-  │
-  │ WAN 3
-  ▼
-CPD-Edge
-  │
-  ▼
-Server-Financial-Hub
-```
-
-O caminho alternativo é fornecido pela WAN 2:
-
-```text
-Filial RJ
-    │
-    │ WAN 2
-    ▼
-CPD
-```
-
----
-
-# 🌍 7. eBGPv4
-
-O **eBGPv4** é utilizado para interconectar os dois Sistemas Autônomos definidos no projeto.
-
-| Sistema         |      AS |
-| --------------- | ------: |
-| Matriz + Filial | `65001` |
-| CPD Regulatório | `65002` |
-
-Portanto:
-
-```text
-AS 65001
-Matriz + Filial
-       │
-       │ eBGP
-       │
-AS 65002
-CPD Regulatório
-```
-
----
-
-# 🔗 8. Peering eBGP
-
-A sessão eBGP é estabelecida sobre a **WAN 3**.
-
-Os vizinhos são:
-
-| Dispositivo          | IP          |      AS |
-| -------------------- | ----------- | ------: |
-| `HQ-Edge-RTR`        | `10.0.0.10` | `65001` |
-| `CPD-Datacenter-RTR` | `10.0.0.9`  | `65002` |
-
-A sessão utiliza:
-
-```text
-TCP/179
-```
-
-Configuração conceitual no `HQ-Edge-RTR`:
-
-```cisco
 router bgp 65001
+ bgp log-neighbor-changes
  neighbor 10.0.0.9 remote-as 65002
+ redistribute ospf 1
 ```
 
-No CPD:
+No `CPD-Datacenter-RTR`:
 
-```cisco
+```text
 router bgp 65002
+ bgp log-neighbor-changes
  neighbor 10.0.0.10 remote-as 65001
+ network 172.16.32.0 mask 255.255.252.0
+ network 192.168.100.1 mask 255.255.255.255
+ network 10.0.0.4 mask 255.255.255.252
 ```
 
 ---
 
-# 📢 9. Prefixos Anunciados pelo CPD
+# 📢 2.2 Anúncios originados pelo Datacenter
 
-O CPD anuncia ao ambiente corporativo os prefixos necessários para alcançar seus recursos.
+O CPD anuncia para a Matriz:
 
-São anunciados:
+| Prefixo            | Finalidade                               |
+| :----------------- | :--------------------------------------- |
+| `172.16.32.0/22`   | Bloco local de servidores                |
+| `10.0.0.4/30`      | Enlace WAN 2                             |
+| `192.168.100.1/32` | Loopback 0 / serviço de teste de peering |
 
-```text
-172.16.32.0/22
-10.0.0.4/30
-192.168.100.1/32
-```
-
-Eles representam:
-
-* a LAN dos servidores do CPD;
-* o enlace WAN 2;
-* a Loopback 0 do roteador do CPD.
+A `Loopback0` é utilizada para representar um serviço corporativo lógico que não depende da disponibilidade física de uma interface Ethernet ou serial.
 
 ---
 
-# 🔄 10. Redistribuição BGP → OSPF
+# 🔄 3. Redistribuição Mútua de Rotas
 
-O `HQ-Edge-RTR` funciona como ponto de integração entre os dois protocolos.
+O ponto de integração entre os domínios de roteamento ocorre no **HQ-Edge-RTR**.
 
-As rotas aprendidas pelo BGP a partir do CPD são injetadas no OSPF.
-
-A configuração utilizada é:
-
-```cisco
-router ospf 1
- redistribute bgp 65001 subnets
-exit
-```
-
-Isso permite que os dispositivos que participam apenas do OSPF, como o Core da Matriz, conheçam as redes aprendidas através do BGP.
-
-O fluxo pode ser representado como:
+O roteador de borda funciona como elemento de conversão entre:
 
 ```text
-CPD
- │
- │ eBGP
- ▼
+OSPFv2
+   │
+   │ Rotas internas
+   ▼
 HQ-Edge-RTR
- │
- │ Redistribute BGP → OSPF
- ▼
-OSPF Área 0
- │
- ▼
+   │
+   │ Redistribuição
+   ▼
+eBGPv4
+```
+
+E no sentido inverso:
+
+```text
+eBGPv4
+   │
+   │ Rotas do CPD
+   ▼
+HQ-Edge-RTR
+   │
+   │ Redistribuição
+   ▼
+OSPFv2
+   │
+   ▼
 HQ-Core-3650
 ```
 
 ---
 
-# 🔄 11. Redistribuição OSPF → BGP
+## 3.1 BGP → OSPF
 
-O processo inverso também ocorre no `HQ-Edge-RTR`.
-
-As redes corporativas aprendidas através do OSPF são redistribuídas para o BGP:
-
-```cisco
-router bgp 65001
- redistribute ospf 1
-exit
-```
-
-O fluxo torna-se:
+As rotas aprendidas via BGP do Datacenter são injetadas no OSPF através de:
 
 ```text
-VLANs / Redes Corporativas
-          │
-          ▼
-     HQ-Core-3650
-          │
-        OSPF
-          │
-          ▼
-     HQ-Edge-RTR
-          │
-  Redistribute OSPF → BGP
-          │
-          ▼
-         eBGP
-          │
-          ▼
-     CPD-Datacenter
+redistribute bgp 65001 subnets
 ```
 
-Dessa maneira, o CPD consegue aprender os prefixos corporativos através do BGP.
+Com isso, o `HQ-Core-3650` pode conhecer as redes do CPD sem executar BGP internamente.
 
 ---
 
-# 🔁 12. Ponto de Integração do Roteamento
+## 3.2 OSPF → BGP
 
-O `HQ-Edge-RTR` possui uma função central na arquitetura de roteamento.
-
-Ele conecta:
+As rotas das VLANs da Matriz aprendidas via OSPF são injetadas no BGP através de:
 
 ```text
-                ┌──────────────┐
-                │   OSPF       │
-                │  Área 0      │
-                └──────┬───────┘
-                       │
-                       │
-                ┌──────▼───────┐
-                │ HQ-Edge-RTR  │
-                │              │
-                │ Redistribui  │
-                │ OSPF ↔ BGP   │
-                └──────┬───────┘
-                       │
-                       │
-                ┌──────▼───────┐
-                │    eBGP      │
-                │ AS 65001 ↔   │
-                │ AS 65002     │
-                └──────────────┘
+redistribute ospf 1
 ```
 
-O Core não precisa executar BGP diretamente.
-
-O roteador de borda funciona como fronteira entre:
-
-* o domínio interno OSPF;
-* o domínio externo BGP.
+Essas rotas são então disponibilizadas ao Datacenter através da sessão eBGP.
 
 ---
 
-# 🛟 13. Resiliência da Filial RJ
+# 🔁 4. Malha WAN Serial em Anel
 
-A Filial RJ possui um mecanismo adicional de contingência porque **não executa BGP diretamente**.
-
-O `Branch-Edge-RTR` utiliza **rotas estáticas flutuantes** com:
+A conectividade entre os três sítios utiliza uma **topologia WAN serial em anel fechado**.
 
 ```text
-Administrative Distance = 115
+                    ┌───────────────────────┐
+                    │ CPD / Datacenter      │
+                    │ CPD-Datacenter-RTR    │
+                    └───────────┬───────────┘
+                         WAN 2  │  WAN 3
+                                │
+              ┌─────────────────┴─────────────────┐
+              │                                   │
+              ▼                                   ▼
+┌─────────────────────────┐             ┌─────────────────────────┐
+│ Filial Regional RJ      │             │ Matriz SP               │
+│ Branch-Edge-RTR         │──── WAN 1 ──│ HQ-Edge-RTR              │
+└─────────────────────────┘             └─────────────────────────┘
 ```
 
-O valor é superior à distância administrativa do OSPF:
-
-```text
-OSPF = 110
-Floating Static = 115
-```
-
-Portanto, as rotas estáticas permanecem como caminhos de contingência enquanto as rotas OSPF estiverem disponíveis.
+A malha utiliza módulos **HWIC-2T instalados no Slot 3** dos roteadores.
 
 ---
 
-# 🧭 14. Rotas Estáticas Flutuantes
+## 4.1 WAN 1 — Matriz ↔ Filial RJ
 
-No `Branch-Edge-RTR`, são configuradas rotas para os principais blocos remotos.
+```text
+10.0.0.0/30
+```
 
-### Redes corporativas da Matriz
+| Ponta     | Interface | IP         | Papel |
+| :-------- | :-------- | :--------- | :---- |
+| Matriz SP | `Se0/3/0` | `10.0.0.1` | DCE   |
+| Filial RJ | `Se0/3/1` | `10.0.0.2` | DTE   |
 
-```cisco
+No lado DCE:
+
+```text
+clock rate 64000
+```
+
+A WAN 1 representa a ligação primária entre Matriz e Filial Regional.
+
+---
+
+## 4.2 WAN 2 — Filial RJ ↔ CPD
+
+```text
+10.0.0.4/30
+```
+
+| Ponta     | Interface | IP         | Papel |
+| :-------- | :-------- | :--------- | :---- |
+| Filial RJ | `Se0/3/0` | `10.0.0.5` | DCE   |
+| CPD       | `Se0/3/1` | `10.0.0.6` | DTE   |
+
+No lado DCE:
+
+```text
+clock rate 64000
+```
+
+A WAN 2 representa o caminho secundário entre a Filial RJ e o Datacenter.
+
+---
+
+## 4.3 WAN 3 — CPD ↔ Matriz
+
+```text
+10.0.0.8/30
+```
+
+| Ponta     | Interface | IP          | Papel |
+| :-------- | :-------- | :---------- | :---- |
+| CPD       | `Se0/3/0` | `10.0.0.9`  | DCE   |
+| Matriz SP | `Se0/3/1` | `10.0.0.10` | DTE   |
+
+No lado DCE:
+
+```text
+clock rate 64000
+```
+
+A WAN 3 também transporta a sessão eBGP entre o `HQ-Edge-RTR` e o `CPD-Datacenter-RTR`.
+
+---
+
+# 🧭 5. Caminho Primário e Caminhos de Contingência
+
+A arquitetura combina o roteamento dinâmico com rotas estáticas de segurança.
+
+O princípio de funcionamento documentado é:
+
+```text
+                 ┌───────────────┐
+                 │   MATRIZ SP   │
+                 └───────┬───────┘
+                         │
+                      WAN 1
+                         │
+                         ▼
+                 ┌───────────────┐
+                 │   FILIAL RJ   │
+                 └───────┬───────┘
+                         │
+                      WAN 2
+                         │
+                         ▼
+                 ┌───────────────┐
+                 │      CPD      │
+                 └───────────────┘
+```
+
+Ao mesmo tempo, a WAN 3 fecha o anel:
+
+```text
+CPD ───────────── WAN 3 ───────────── MATRIZ
+```
+
+Essa estrutura permite que a comunicação possa utilizar caminhos alternativos em situações de falha.
+
+---
+
+# 🛡️ 6. Rotas Estáticas Flutuantes — AD 115
+
+O `Branch-Edge-RTR` possui rotas estáticas de contingência configuradas com **Distância Administrativa 115**.
+
+A finalidade dessas rotas é fornecer caminhos alternativos quando as rotas dinâmicas correspondentes deixam de estar disponíveis.
+
+---
+
+## 6.1 Contingência com a Matriz SP
+
+Foram configuradas rotas cobrindo:
+
+```text
+172.16.0.0/20
+172.16.99.0/24
+```
+
+apontando para:
+
+```text
+10.0.0.1
+```
+
+com:
+
+```text
+AD 115
+```
+
+Configuração documentada:
+
+```text
 ip route 172.16.0.0 255.255.240.0 10.0.0.1 115
-```
-
-### Gerência da Matriz
-
-```cisco
 ip route 172.16.99.0 255.255.255.0 10.0.0.1 115
 ```
 
-### LAN do CPD
+Essas rotas funcionam como contingência contra falhas lógicas do processo OSPF no enlace direto WAN 1.
 
-```cisco
-ip route 172.16.32.0 255.255.252.0 10.0.0.6 115
+---
+
+## 6.2 Contingência com o CPD através da WAN 2
+
+Também foram configuradas rotas estáticas de contingência para as redes do Datacenter:
+
+```text
+172.16.32.0/22
+192.168.100.1/32
 ```
 
-### Loopback do CPD
+utilizando:
 
-```cisco
+```text
+10.0.0.6
+```
+
+com **AD 115**.
+
+Configuração documentada:
+
+```text
+ip route 172.16.32.0 255.255.252.0 10.0.0.6 115
 ip route 192.168.100.1 255.255.255.255 10.0.0.6 115
 ```
 
 ---
 
-# 🔄 15. Redistribuição das Rotas Estáticas no OSPF
+# 🔄 7. Redistribuição das Rotas Estáticas no RJ
 
-As rotas estáticas de contingência também são redistribuídas para o OSPF da Filial.
-
-No `Branch-Edge-RTR`:
-
-```cisco
-router ospf 1
- redistribute static subnets
-exit
-```
-
-Isso permite que o `Branch-Core-3650` tenha conhecimento dos caminhos de contingência instalados no roteador regional.
-
-O fluxo é:
+O `Branch-Edge-RTR` redistribui as rotas estáticas para o OSPF:
 
 ```text
-Floating Static Route
-        │
-        ▼
-Branch-Edge-RTR
-        │
-        │ redistribute static subnets
-        ▼
-     OSPF Área 0
-        │
-        ▼
-Branch-Core-3650
+router ospf 1
+ redistribute static subnets
 ```
 
----
+Essa integração permite que as rotas de contingência do roteador regional sejam disponibilizadas ao domínio OSPF.
 
-# 🧭 16. Rota Padrão do Core RJ
+O `Branch-Core-3650`, por sua vez, mantém uma rota padrão apontando para o roteador regional:
 
-O `Branch-Core-3650` possui uma rota padrão apontando para o `Branch-Edge-RTR`:
-
-```cisco
+```text
 ip route 0.0.0.0 0.0.0.0 172.19.4.2
 ```
 
-Assim, o Core encaminha destinos não conhecidos para o roteador de borda.
-
-```text
-Branch-Core-3650
-        │
-        │ default route
-        ▼
-172.19.4.2
-        │
-        ▼
-Branch-Edge-RTR
-```
+Dessa forma, o Core regional possui um caminho para fora de suas redes locais através do `Branch-Edge-RTR`.
 
 ---
 
-# 🚨 17. Cenário de Falha WAN
+# 🗄️ 8. Rotas Estáticas de Retorno no CPD
 
-O principal teste de resiliência consiste em interromper o enlace **WAN 1** entre a Filial RJ e a Matriz.
+O `CPD-Datacenter-RTR` possui rotas estáticas reversas para as redes da Filial RJ:
+
+```text
+172.19.0.0/22
+172.19.99.0/24
+```
+
+Ambas apontam para o endereço do roteador regional através da WAN 2:
+
+```text
+10.0.0.5
+```
+
+Configuração documentada:
+
+```text
+ip route 172.19.0.0 255.255.252.0 10.0.0.5
+ip route 172.19.99.0 255.255.255.0 10.0.0.5
+```
+
+Esse caminho de retorno permite que o CPD encaminhe o tráfego destinado à Filial RJ diretamente pela WAN 2.
+
+---
+
+# 🔬 9. Cenário de Falha da WAN 1
+
+A arquitetura foi estruturada para contemplar a interrupção do enlace primário entre Matriz SP e Filial RJ.
 
 ### Situação normal
 
 ```text
-RJ ───────────────► HQ ───────────────► CPD
-       WAN 1                 WAN 3
+MATRIZ SP
+    │
+    │ WAN 1
+    ▼
+FILIAL RJ
 ```
 
-### Falha
+### Com a interrupção da WAN 1
 
-A interface:
+O anel oferece o caminho alternativo:
 
 ```text
-Branch-Edge-RTR Se0/3/0
-```
-
-é colocada em:
-
-```cisco
-shutdown
-```
-
-Com isso, o caminho direto entre RJ e Matriz é interrompido.
-
----
-
-# 🔄 18. Convergência para a WAN 2
-
-Com a perda do enlace WAN 1, o mecanismo de contingência utiliza o enlace:
-
-```text
-WAN 2
-10.0.0.4/30
-```
-
-O caminho passa a ser:
-
-```text
-RJ
- │
- │ WAN 2
- ▼
+MATRIZ SP
+    │
+    │ WAN 3
+    ▼
 CPD
+    │
+    │ WAN 2
+    ▼
+FILIAL RJ
 ```
 
-Em representação completa:
+O mecanismo de contingência combina:
 
-```text
-PC-RJ-Ops-01
-      │
-      ▼
-Branch-Core-3650
-      │
-      ▼
-Branch-Edge-RTR
-      │
-      │ WAN 2
-      ▼
-CPD-Datacenter-RTR
-      │
-      ▼
-Server-Financial-Hub
-```
+* topologia física em anel;
+* OSPF Área 0;
+* redistribuição de rotas;
+* rotas estáticas com AD 115;
+* rota padrão no Core da Filial;
+* rotas estáticas de retorno no CPD.
 
 ---
 
-# 🧪 19. Teste de Failover
+# 🧪 10. Validação do Roteamento
 
-O teste definido no cenário utiliza comunicação ICMP contínua.
+A verificação operacional do comportamento de roteamento deve observar principalmente:
 
-### Origem
+| Elemento                   | Estado esperado             |
+| :------------------------- | :-------------------------- |
+| Adjacências OSPF           | Estabelecidas               |
+| Processo OSPF              | `1`                         |
+| Área                       | `0`                         |
+| Router IDs                 | Únicos conforme projeto     |
+| Sessão eBGP                | Estabelecida entre HQ e CPD |
+| AS Matriz/RJ               | `65001`                     |
+| AS CPD                     | `65002`                     |
+| WAN 1                      | Enlace primário SP ↔ RJ     |
+| WAN 2                      | Caminho RJ ↔ CPD            |
+| WAN 3                      | Peering HQ ↔ CPD            |
+| Rotas estáticas flutuantes | AD `115`                    |
+| Rota padrão do Core RJ     | Próximo salto `172.19.4.2`  |
+| Rotas de retorno do CPD    | Próximo salto `10.0.0.5`    |
 
-```text
-PC-RJ-Ops-01
-IP: 172.19.2.51
-```
-
-### Destino
-
-```text
-Server-Financial-Hub
-IP: 172.16.32.10
-```
-
-### Sequência
-
-```text
-1. Iniciar ICMP contínuo
-          │
-          ▼
-2. Comunicação pelo caminho normal
-          │
-          ▼
-3. Executar shutdown em
-   Branch-Edge-RTR Se0/3/0
-          │
-          ▼
-4. OSPF detecta a perda do caminho
-          │
-          ▼
-5. Rota flutuante AD 115 assume
-          │
-          ▼
-6. Tráfego utiliza WAN 2
-          │
-          ▼
-7. Comunicação com o CPD é restabelecida
-```
-
----
-
-# ⏱️ 20. Comportamento Esperado na Convergência
-
-Segundo o cenário, o teste de falha deve produzir uma **perda transitória de 1 a 2 pacotes ICMP** durante o processo de expiração do Dead Interval do OSPF.
-
-Depois disso:
+### Comandos de verificação
 
 ```text
-OSPF perde o caminho primário
-          ↓
-Rotas OSPF deixam de ser preferenciais
-          ↓
-Floating Static AD 115
-          ↓
-WAN 2
-          ↓
-CPD
-```
-
-O objetivo do mecanismo é manter a comunicação sem necessidade de intervenção manual após a configuração da contingência.
-
----
-
-# 🧩 21. Distância Administrativa
-
-A lógica da contingência depende da diferença entre as distâncias administrativas.
-
-```text
-┌───────────────────────────────┐
-│ OSPF                          │
-│ AD = 110                      │
-│                               │
-│ Caminho preferencial          │
-└───────────────┬───────────────┘
-                │
-                │ Falha
-                ▼
-┌───────────────────────────────┐
-│ Floating Static               │
-│ AD = 115                      │
-│                               │
-│ Caminho de contingência       │
-└───────────────────────────────┘
-```
-
-Enquanto o OSPF estiver fornecendo o caminho correspondente, a rota estática com AD 115 não é a rota preferencial.
-
-Quando o caminho OSPF deixa de estar disponível, a rota estática pode assumir.
-
----
-
-# 🔍 22. Comandos de Verificação de Roteamento
-
-## Verificar vizinhos OSPF
-
-```cisco
 show ip ospf neighbor
-```
-
-Permite verificar as adjacências OSPF.
-
-O cenário utiliza o estado:
-
-```text
-FULL
-```
-
-como referência para uma adjacência estabelecida.
-
----
-
-## Verificar rotas
-
-```cisco
 show ip route
-```
-
-Permite observar as rotas instaladas na tabela de roteamento.
-
----
-
-## Verificar OSPF
-
-```cisco
-show ip ospf
-```
-
-Permite consultar informações do processo OSPF.
-
----
-
-## Verificar BGP
-
-No `HQ-Edge-RTR` e no `CPD-Datacenter-RTR`:
-
-```cisco
+show ip route ospf
+show ip route bgp
+show ip protocols
 show ip bgp summary
+show ip bgp
+show interfaces serial 0/3/0
+show interfaces serial 0/3/1
 ```
 
-O comando permite verificar a sessão BGP e os prefixos associados ao vizinho.
+Os comandos acima são referências para inspeção do estado da infraestrutura. As evidências visuais correspondentes fazem parte da documentação do projeto e servem para demonstrar o funcionamento da implementação no ambiente simulado.
 
 ---
 
-# 🧪 23. Validação da Sessão eBGP
-
-A relação esperada é:
+# 🗺️ 11. Visão Consolidada do Roteamento
 
 ```text
-HQ-Edge-RTR
-10.0.0.10
-AS 65001
-     │
-     │ TCP/179
-     │
-     ▼
-CPD-Datacenter-RTR
-10.0.0.9
-AS 65002
+                           ┌──────────────────────────┐
+                           │ CPD-Datacenter-RTR       │
+                           │ AS 65002                 │
+                           │                          │
+                           │ OSPF + eBGP              │
+                           └──────┬───────────┬───────┘
+                                  │           │
+                              WAN 2│           │WAN 3
+                                  │           │
+                                  │           │ eBGP
+                                  │           │
+                                  ▼           ▼
+                     ┌────────────────┐   ┌────────────────┐
+                     │ Branch-Edge-RTR│   │  HQ-Edge-RTR   │
+                     │ AS 65001       │   │ AS 65001       │
+                     │ OSPF           │   │ OSPF + BGP     │
+                     └───────┬────────┘   └───────┬────────┘
+                             │                    │
+                         OSPF│                    │OSPF
+                             │                    │
+                             ▼                    ▼
+                     ┌──────────────┐      ┌──────────────┐
+                     │ Branch-Core  │      │  HQ-Core     │
+                     │   3650       │      │    3650      │
+                     └──────────────┘      └──────────────┘
 ```
-
-A verificação deve confirmar:
-
-* vizinho configurado;
-* AS remoto correto;
-* sessão estabelecida;
-* prefixos recebidos/anunciados conforme a configuração.
 
 ---
 
-# 🧭 24. Fluxos de Roteamento
+# 📌 12. Resumo dos Mecanismos de Resiliência
 
-## 24.1. Matriz → CPD
+| Mecanismo                              | Função no projeto                               |
+| :------------------------------------- | :---------------------------------------------- |
+| **OSPFv2 Área 0**                      | Roteamento interno entre Core e Edge            |
+| **eBGPv4**                             | Integração entre AS `65001` e AS `65002`        |
+| **Redistribuição BGP → OSPF**          | Disponibiliza rotas do CPD ao domínio interno   |
+| **Redistribuição OSPF → BGP**          | Disponibiliza rotas da Matriz ao CPD            |
+| **WAN em anel**                        | Disponibiliza caminhos físicos alternativos     |
+| **Rotas estáticas AD 115**             | Contingência de roteamento na Filial RJ         |
+| **Redistribuição de estáticas → OSPF** | Propaga contingência ao Core RJ                 |
+| **Default route no Core RJ**           | Encaminha tráfego externo ao `Branch-Edge-RTR`  |
+| **Rotas de retorno no CPD**            | Mantêm o caminho de retorno para as redes do RJ |
 
-O caminho lógico envolve:
+---
+
+# 📁 13. Arquivos Relacionados
 
 ```text
-Rede da Matriz
-      │
-      ▼
-HQ-Core-3650
-      │
-      │ OSPF
-      ▼
-HQ-Edge-RTR
-      │
-      │ eBGP
-      ▼
-CPD-Datacenter-RTR
-      │
-      ▼
-172.16.32.0/22
+docs/
+├── 01-architecture-and-addressing.md
+├── 02-routing-and-resilience.md
+├── 03-design-decisions.md
+└── 04-limitations-and-lessons.md
 ```
 
----
+| Arquivo                             | Escopo                                         |
+| :---------------------------------- | :--------------------------------------------- |
+| `01-architecture-and-addressing.md` | Topologia, ativos, VLANs e endereçamento       |
+| `02-routing-and-resilience.md`      | OSPF, eBGP, redistribuição, WAN e contingência |
+| `03-design-decisions.md`            | Racional técnico das decisões de arquitetura   |
+| `04-limitations-and-lessons.md`     | Restrições do laboratório e aprendizados       |
 
-## 24.2. CPD → Matriz
-
-O caminho inverso utiliza:
-
-```text
-CPD
- │
- │ eBGP
- ▼
-HQ-Edge-RTR
- │
- │ OSPF
- ▼
-HQ-Core-3650
- │
- ▼
-VLAN correspondente
-```
-
----
-
-## 24.3. Filial → CPD em condição normal
-
-```text
-Filial
- │
- ▼
-Branch-Core
- │
- ▼
-Branch-Edge
- │
- │ WAN 1
- ▼
-HQ-Edge
- │
- │ WAN 3
- ▼
-CPD
-```
-
----
-
-## 24.4. Filial → CPD durante contingência
-
-```text
-Filial
- │
- ▼
-Branch-Core
- │
- ▼
-Branch-Edge
- │
- │ WAN 2
- ▼
-CPD
-```
-
----
-
-# 🧠 25. Arquitetura de Resiliência
-
-A resiliência do projeto não depende de um único mecanismo.
-
-Ela é construída em camadas:
-
-```text
-┌─────────────────────────────────────────────┐
-│              RESILIÊNCIA WAN                │
-├─────────────────────────────────────────────┤
-│                                             │
-│  1. Topologia física em anel                │
-│                  ↓                          │
-│  2. OSPF para roteamento interno            │
-│                  ↓                          │
-│  3. eBGP para integração com o CPD          │
-│                  ↓                          │
-│  4. Redistribuição OSPF ↔ BGP               │
-│                  ↓                          │
-│  5. Floating Static Routes — AD 115         │
-│                  ↓                          │
-│  6. WAN 2 como caminho de contingência      │
-│                                             │
-└─────────────────────────────────────────────┘
-```
-
----
-
-# 📊 26. Resumo dos Protocolos
-
-| Tecnologia                     | Escopo           | Função                                  |
-| ------------------------------ | ---------------- | --------------------------------------- |
-| **OSPFv2**                     | Ambiente interno | Roteamento IGP                          |
-| **Área 0**                     | Domínio OSPF     | Backbone                                |
-| **eBGPv4**                     | HQ ↔ CPD         | Roteamento entre AS                     |
-| **AS 65001**                   | HQ + RJ          | Domínio corporativo                     |
-| **AS 65002**                   | CPD              | Domínio do Datacenter                   |
-| **Redistribute BGP → OSPF**    | HQ-Edge          | Divulgação de rotas do CPD ao OSPF      |
-| **Redistribute OSPF → BGP**    | HQ-Edge          | Divulgação de redes corporativas ao CPD |
-| **Redistribute Static → OSPF** | Branch-Edge      | Divulgação das rotas de contingência    |
-| **Floating Static AD 115**     | Branch-Edge      | Contingência de roteamento              |
-| **WAN 1**                      | HQ ↔ RJ          | Caminho primário da Filial              |
-| **WAN 2**                      | RJ ↔ CPD         | Caminho de contingência                 |
-| **WAN 3**                      | CPD ↔ HQ         | Interconexão eBGP                       |
-
----
-
-# 🗺️ 27. Mapa Consolidado do Roteamento
-
-```mermaid
-flowchart TB
-
-    HQCORE["HQ-Core-3650<br/>OSPF"]
-    HQEDGE["HQ-Edge-RTR<br/>OSPF + eBGP<br/>AS 65001"]
-    BRCORE["Branch-Core-3650<br/>OSPF"]
-    BREDGE["Branch-Edge-RTR<br/>OSPF + Static"]
-    CPD["CPD-Datacenter-RTR<br/>eBGP<br/>AS 65002"]
-    SERVER["Server-Financial-Hub<br/>172.16.32.10"]
-
-    HQCORE -->|"OSPF"| HQEDGE
-    BRCORE -->|"OSPF"| BREDGE
-
-    HQEDGE <-->|"WAN 1<br/>10.0.0.0/30"| BREDGE
-    BREDGE <-->|"WAN 2<br/>10.0.0.4/30"| CPD
-    CPD <-->|"WAN 3<br/>10.0.0.8/30<br/>eBGP TCP/179"| HQEDGE
-
-    CPD --> SERVER
-
-    HQEDGE -.->|"BGP → OSPF"| HQCORE
-    HQCORE -.->|"OSPF → BGP"| HQEDGE
-
-    BREDGE -.->|"Floating Static<br/>AD 115"| CPD
-```
-
----
-
-# 🚨 28. Pontos Críticos para Troubleshooting
-
-Quando houver problemas de conectividade entre localidades, a análise deve seguir a cadeia de dependências:
-
-```text
-Interface física
-      ↓
-Endereço IP do enlace
-      ↓
-Adjacência OSPF
-      ↓
-Tabela de roteamento
-      ↓
-Redistribuição
-      ↓
-Sessão BGP
-      ↓
-Prefixos
-      ↓
-Caminho de contingência
-```
-
-Problemas em uma etapa inferior podem impedir que as etapas superiores funcionem corretamente.
-
-Por isso, a validação deve começar pela conectividade do enlace antes de concluir que existe uma falha de BGP, OSPF ou redistribuição.
-
----
-
-# 🔗 29. Relação com os Demais Documentos
-
-Este documento trata especificamente de **roteamento e resiliência**.
-
-| Documento                           | Escopo                                        |
-| ----------------------------------- | --------------------------------------------- |
-| `01-architecture-and-addressing.md` | Arquitetura física/lógica e plano IPv4        |
-| `02-routing-and-resilience.md`      | **OSPF, eBGP, redistribuição e contingência** |
-| `03-design-decisions.md`            | Motivações e decisões arquiteturais           |
-| `04-limitations-and-lessons.md`     | Limitações, resultados e aprendizados         |
-| `verification-playbook.md`          | Procedimentos para validar o funcionamento    |
-| `troubleshooting-runbook.md`        | Diagnóstico e resolução de falhas             |
-
----
-
-# 📁 30. Evidências Relacionadas
-
-As evidências visuais referentes ao funcionamento do roteamento ficam organizadas em:
-
-```text
-assets/
-└── evidences/
-    ├── ev-01-ospf-adjacency.png
-    ├── ev-02-ebgp-peering-established.png
-    └── ev-04-wan-failover-convergence.png
-```
-
-### `ev-01-ospf-adjacency.png`
-
-Evidência da formação das adjacências OSPF.
-
-### `ev-02-ebgp-peering-established.png`
-
-Evidência do estabelecimento da sessão eBGP entre Matriz e CPD.
-
-### `ev-04-wan-failover-convergence.png`
-
-Evidência do comportamento da rede durante o teste de falha e convergência.
-
----
-
-# ✅ 31. Checklist de Roteamento e Resiliência
-
-* [x] OSPFv2 documentado
-* [x] Área 0 documentada
-* [x] Wildcard masks documentadas
-* [x] Router IDs relevantes documentados
-* [x] eBGPv4 documentado
-* [x] AS 65001 documentado
-* [x] AS 65002 documentado
-* [x] Peering WAN 3 documentado
-* [x] TCP/179 documentado
-* [x] Prefixos anunciados pelo CPD documentados
-* [x] Redistribuição BGP → OSPF documentada
-* [x] Redistribuição OSPF → BGP documentada
-* [x] Redistribuição Static → OSPF documentada
-* [x] Floating Static Routes documentadas
-* [x] AD 115 documentada
-* [x] Rota padrão do Core RJ documentada
-* [x] WAN 1 documentada como caminho primário da Filial
-* [x] WAN 2 documentada como caminho de contingência
-* [x] WAN 3 documentada
-* [x] Distribuição DCE/DTE documentada
-* [x] `clock rate 64000` documentado
-* [x] Cenário de falha WAN documentado
-* [x] Teste ICMP documentado
-* [x] Origem e destino do teste documentados
-* [x] Processo de convergência documentado
-* [x] Comandos de verificação documentados
-* [x] Relação com os demais documentos registrada
-
----
-
-> **Fonte técnica:** cenário oficial do PROJETO ANIBIA.
->
-> Este documento concentra exclusivamente os mecanismos de **roteamento e resiliência** da implementação. O plano detalhado de endereçamento e segmentação está documentado em `01-architecture-and-addressing.md`, enquanto as decisões arquiteturais e as limitações do laboratório são tratadas nos documentos correspondentes.
+Este documento, portanto, concentra o **comportamento dos caminhos de roteamento e dos mecanismos de resiliência**, sem duplicar o detalhamento estrutural e de endereçamento apresentado no documento de arquitetura.
