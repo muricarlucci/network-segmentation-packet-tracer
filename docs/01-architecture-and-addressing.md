@@ -124,7 +124,7 @@ A implementação física da topologia foi realizada no **Cisco Packet Tracer**,
         └──────────────┘                         └──────────────┘
 ```
 
-![Topologia Física Implementada no Cisco Packet Tracer](assets/topology-packet-tracer.png)
+![Topologia Física Implementada no Cisco Packet Tracer](01-physical-topology.png)
 
 ---
 
