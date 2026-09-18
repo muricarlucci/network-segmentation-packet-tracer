@@ -1,0 +1,13 @@
+# Arquivos de Sistema Operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Arquivos Temporários de Editores
+*.swp
+*.bak
+*~
+
+# Arquivos Temporários do Cisco Packet Tracer
+*.tmp
+*.pkt.autosave
