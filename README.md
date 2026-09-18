@@ -55,7 +55,7 @@ flowchart TD
     CPD_RTR -- "WAN 3: 10.0.0.8/30 (Sessão eBGP TCP/179)" --- HQ_RTR
 ```
 
-![Topologia Física Implementada no Cisco Packet Tracer](assets/topology-packet-tracer.png)
+![Topologia Física Implementada no Cisco Packet Tracer](assets/diagrams/01-physical-topology.png)
 
 ---
 
