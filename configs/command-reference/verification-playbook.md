@@ -7,13 +7,13 @@
 
 Playbook de validação da infraestrutura corporativa simulada da ANBIMA no Cisco Packet Tracer. Este documento consolida os procedimentos de verificação da malha OSPF, do peering eBGP, da entrega dinâmica de endereçamento via DHCP, da redundância WAN por rotas estáticas flutuantes e dos mecanismos de hardening aplicados aos ativos gerenciáveis.
 
-A validação considera os três sítios da arquitetura — **Matriz SP**, **Filial Regional RJ** e **CPD Regulatório/Datacenter** — e deve ser executada preservando a topologia, os endereços e os papéis definidos no projeto.
+A validação considera os três sítios da arquitetura — **Matriz SP**, **Filial Regional RJ** e **CPD Regulatório/Datacenter** — e apresenta as evidências utilizadas no projeto para demonstrar o funcionamento da infraestrutura.
 
 ---
 
 ## 🏛️ 1. Visão Geral do Processo de Validação
 
-A validação operacional segue quatro frentes principais:
+A validação operacional do projeto está organizada em quatro frentes principais:
 
 ```mermaid
 flowchart TD
@@ -32,7 +32,7 @@ flowchart TD
     C --> C4["DNS 172.16.32.10"]
 
     D --> D1["WAN 1<br/>10.0.0.0/30"]
-    D --> D2["Falha Se0/3/0 RJ"]
+    D --> D2["Falha do enlace primário"]
     D --> D3["AD 115"]
     D --> D4["WAN 2<br/>10.0.0.4/30"]
 
@@ -59,7 +59,7 @@ flowchart TD
 
 ## 🔬 2. Matriz de Validação
 
-| ID        | Domínio    | Elemento validado | Evidência esperada                                                 |
+| ID        | Domínio    | Elemento validado | Evidência apresentada no projeto                                   |
 | :-------- | :--------- | :---------------- | :----------------------------------------------------------------- |
 | **EV-01** | Routing    | OSPFv2            | Adjacências em estado `FULL`                                       |
 | **EV-02** | Routing    | eBGPv4            | Sessão estabelecida e troca de prefixos                            |
@@ -67,7 +67,7 @@ flowchart TD
 | **EV-04** | Resilience | Failover WAN      | Perda transitória de 1–2 pacotes e utilização da WAN 2             |
 | **EV-05** | Security   | SSHv2             | Gerenciamento remoto protegido e parâmetros de hardening aplicados |
 
-Os registros gráficos correspondentes devem ser armazenados em:
+As capturas que comprovam esses testes fazem parte dos **assets do próprio projeto**, disponibilizados para consulta e análise no repositório:
 
 ```text
 assets/evidences/
@@ -86,11 +86,9 @@ assets/evidences/
 
 O OSPFv2 opera como protocolo interno da arquitetura, abrangendo os roteadores de borda e os Switches Core da Matriz e do Rio de Janeiro.
 
-A validação deve confirmar a formação das adjacências entre os elementos participantes da Área 0.
+A validação confirma a formação das adjacências entre os elementos participantes da Área 0.
 
-### Comando de verificação
-
-Executar nos roteadores de borda:
+### Comando utilizado na verificação
 
 ```cisco
 show ip ospf neighbor
@@ -104,7 +102,7 @@ A tabela de vizinhos deve apresentar as adjacências em estado:
 FULL
 ```
 
-O estado `FULL` representa a adjacência operacional utilizada como referência no cenário para validar a convergência OSPF.
+O estado `FULL` representa a adjacência operacional utilizada no cenário para validar a convergência OSPF.
 
 ### Pontos de atenção
 
@@ -147,7 +145,7 @@ CPD-Datacenter-RTR
 HQ-Edge-RTR
 ```
 
-### Comandos de verificação
+### Comandos utilizados na verificação
 
 No `HQ-Edge-RTR`:
 
@@ -165,18 +163,16 @@ show ip bgp summary
 
 A sessão eBGP deve aparecer como estabelecida, com troca de prefixos entre os dois Sistemas Autônomos.
 
-A validação deve considerar especificamente:
+A validação considera especificamente:
 
 * vizinho `10.0.0.9` no `HQ-Edge-RTR`;
 * vizinho `10.0.0.10` no `CPD-Datacenter-RTR`;
 * AS remoto `65002` no lado da Matriz;
 * AS remoto `65001` no lado do CPD;
 * sessão sobre a WAN 3;
-* troca contínua de prefixos.
+* troca de prefixos.
 
 ### Prefixos anunciados pelo CPD
-
-O CPD anuncia para a Matriz:
 
 | Prefixo            | Finalidade                                 |
 | :----------------- | :----------------------------------------- |
@@ -184,9 +180,7 @@ O CPD anuncia para a Matriz:
 | `10.0.0.4/30`      | Enlace de backup WAN 2                     |
 | `192.168.100.1/32` | Loopback 0 / serviço ininterrupto de teste |
 
-### Evidência
-
-Salvar a captura da sessão estabelecida em:
+### Evidência apresentada no repositório
 
 ```text
 assets/evidences/ev-02-ebgp-peering-established.png
@@ -347,9 +341,9 @@ Server-Financial-Hub
 172.16.32.10
 ```
 
-### Teste
+### Teste utilizado
 
-A partir do `PC-RJ-Ops-01`, iniciar tráfego ICMP contínuo para:
+A partir do `PC-RJ-Ops-01`, foi utilizado tráfego ICMP contínuo para:
 
 ```text
 172.16.32.10
@@ -367,29 +361,26 @@ No:
 Branch-Edge-RTR
 ```
 
-desativar manualmente:
+a interface utilizada para o enlace primário com a Matriz é:
 
 ```text
-Se0/3/0
+Se0/3/1
 ```
 
-A interface corresponde à:
-
-```text
-WAN 2 → CPD
-```
-
-Wait: o cenário define a `Se0/3/0` do Branch como **WAN 2 para o CPD**, enquanto a `Se0/3/1` é a **WAN 1 para a Matriz**.
-
-Portanto, a sequência de teste deve preservar exatamente a interface definida no cenário:
+A distribuição das interfaces seriais do roteador é:
 
 ```text
 Branch-Edge-RTR
+
 Se0/3/1 → WAN 1 → HQ
 Se0/3/0 → WAN 2 → CPD
 ```
 
-A falha utilizada para o ensaio de perda da conectividade primária deve ser aplicada conforme a interface primária efetivamente conectada à Matriz.
+Portanto, a falha do enlace primário da Filial corresponde à indisponibilidade da:
+
+```text
+Se0/3/1
+```
 
 ---
 
@@ -429,9 +420,7 @@ A rota estática com **AD 115** deve assumir a tabela de roteamento para os dest
 | Novo caminho             | WAN 2                                      |
 | Estado final             | Comunicação com o CPD restabelecida        |
 
-### Evidência
-
-Salvar a captura do teste em:
+### Evidência apresentada no repositório
 
 ```text
 assets/evidences/ev-04-wan-failover-convergence.png
@@ -497,17 +486,16 @@ Os hosts devem iniciar a distribuição dinâmica em:
 
 ---
 
-## 7.3 Procedimento de Validação
+## 7.3 Resultado da Validação
 
-Para cada VLAN corporativa:
+Para cada VLAN corporativa, a validação considera:
 
-1. Selecionar uma estação de trabalho.
-2. Solicitar endereço por DHCP.
-3. Confirmar o recebimento de um endereço válido.
-4. Confirmar que o endereço pertence à sub-rede correta.
-5. Confirmar que a máscara corresponde ao projeto.
-6. Confirmar que o gateway é a SVI da respectiva VLAN.
-7. Confirmar que o DNS aponta para:
+1. Solicitação de endereço por DHCP.
+2. Recebimento de endereço válido.
+3. Endereço pertencente à sub-rede correta.
+4. Máscara correspondente ao projeto.
+5. Gateway igual à SVI da respectiva VLAN.
+6. DNS apontando para:
 
 ```text
 172.16.32.10
@@ -524,9 +512,7 @@ Para cada VLAN corporativa:
 | RJ            | Máscara `/23`           |
 | DHCP          | Servido pelo Core local |
 
-### Evidência
-
-Salvar a captura em:
+### Evidência apresentada no repositório
 
 ```text
 assets/evidences/ev-03-dhcp-core-pools.png
@@ -549,7 +535,7 @@ As VLANs corporativas são:
 | `99`  | Gerência Out-of-Band             | `172.16.99.0/24` |
 | `200` | Trânsito L3                      | `172.16.16.0/30` |
 
-O trunk entre Core e Access deve transportar:
+O trunk entre Core e Access transporta:
 
 ```text
 10,20,30,40,99
@@ -572,7 +558,7 @@ VLAN 200
 | `99`  | Gerência Out-of-Band               | `172.19.99.0/24` |
 | `200` | Trânsito L3                        | `172.19.4.0/30`  |
 
-O trunk entre Core e Access deve transportar:
+O trunk entre Core e Access transporta:
 
 ```text
 10,20,99
@@ -590,7 +576,7 @@ VLAN 200
 
 Todos os **7 ativos gerenciáveis** da topologia possuem parâmetros de hardening definidos no cenário.
 
-## 9.1 Parâmetros obrigatórios
+## 9.1 Parâmetros aplicados
 
 | Controle                   | Configuração    |
 | :------------------------- | :-------------- |
@@ -671,9 +657,7 @@ Branch-Access-2960:
 
 A VLAN 99 é destinada ao gerenciamento dos switches de acesso.
 
-### Evidência
-
-Salvar a captura do estado de gerenciamento SSHv2 em:
+### Evidência apresentada no repositório
 
 ```text
 assets/evidences/ev-05-hardening-sshv2.png
@@ -815,9 +799,9 @@ O objetivo da distribuição DCE/DTE é manter o sincronismo de clock da malha s
 
 ---
 
-# 🧪 13. Sequência Recomendada de Execução
+# 🧪 13. Sequência de Validação Apresentada
 
-A validação completa deve seguir a ordem abaixo:
+A validação completa do projeto está organizada na seguinte sequência:
 
 ```text
 01 ── Verificar conectividade física e interfaces
@@ -840,16 +824,16 @@ A validação completa deve seguir a ordem abaixo:
       │
 10 ── Validar hardening SSHv2
       │
-11 ── Capturar evidências
+11 ── Registrar evidências
 ```
 
 ---
 
-# 📸 14. Padrão de Evidências
+# 📸 14. Evidências do Projeto
 
-Cada teste deve produzir uma captura clara do console ou da área de configuração correspondente.
+As imagens abaixo **não constituem arquivos que o leitor precise gerar ou armazenar**. Elas são evidências produzidas durante a implementação e validação do projeto e disponibilizadas no próprio repositório para que a infraestrutura possa ser analisada visualmente.
 
-| Arquivo                              | Evidência                                         |
+| Arquivo                              | Evidência demonstrada                             |
 | :----------------------------------- | :------------------------------------------------ |
 | `ev-01-ospf-adjacency.png`           | Saída do `show ip ospf neighbor` mostrando `FULL` |
 | `ev-02-ebgp-peering-established.png` | Saída do `show ip bgp summary` no HQ/CPD          |
@@ -857,17 +841,24 @@ Cada teste deve produzir uma captura clara do console ou da área de configuraç
 | `ev-04-wan-failover-convergence.png` | ICMP contínuo + falha + recuperação pela WAN 2    |
 | `ev-05-hardening-sshv2.png`          | Evidência dos parâmetros de gerenciamento SSHv2   |
 
-As imagens devem ser armazenadas exclusivamente em:
+Localização das evidências no repositório:
 
 ```text
 assets/evidences/
+├── ev-01-ospf-adjacency.png
+├── ev-02-ebgp-peering-established.png
+├── ev-03-dhcp-core-pools.png
+├── ev-04-wan-failover-convergence.png
+└── ev-05-hardening-sshv2.png
 ```
+
+O objetivo dessa pasta é **documentar e comprovar o funcionamento da implementação realizada**, permitindo que terceiros consultem as evidências juntamente com os arquivos de configuração e demais documentos do projeto.
 
 ---
 
-# ✅ 15. Critérios Finais de Aceitação
+# ✅ 15. Critérios Finais de Validação
 
-A infraestrutura é considerada validada quando os seguintes resultados forem observados:
+A infraestrutura apresenta os seguintes critérios de funcionamento e configuração:
 
 | Domínio              | Critério                                                              |
 | :------------------- | :-------------------------------------------------------------------- |
@@ -905,4 +896,4 @@ assets/
     └── ev-05-hardening-sshv2.png
 ```
 
-Este diretório concentra as comprovações visuais da operação da infraestrutura, mantendo separadas as evidências de **roteamento**, **serviços**, **resiliência** e **segurança operacional**.
+Este diretório concentra as **evidências visuais da implementação realizada**, mantendo separadas as comprovações de **roteamento**, **serviços**, **resiliência** e **segurança operacional** para consulta e análise do projeto.
