@@ -1,123 +1,117 @@
 ! ==============================================================================
-! ATIVO: HQ-Core-3650 (Switch Multicamada L3 - Sede SP)
-! FUNÇÃO: Roteamento Inter-VLAN (ASIC), SVI Gateways, DHCP Core, OSPF Backbone
+! ATIVO: HQ-Core-3650 (Switch Multicamada L3 - Matriz SP)
+! ARQUIVO: 01_HQ-Core-3650.ios
+! FUNCAO: Roteamento Inter-VLANs, Gateways SVI, DHCP Server e OSPF Area 0
 ! ==============================================================================
-version 15.0
-no service timestamps log datetime msec
-service password-encryption
-!
-hostname HQ-Core-3650
-!
-no enable password
-enable secret cisco
-!
-ip routing
-!
-vlan 10
- name SEC_OPERATIONS
-vlan 20
- name FINANCIAL_CORE
-vlan 30
- name ANALYTICS_DATA
-vlan 40
- name AUDIT_COMPLIANCE
-vlan 99
- name MGMT_HARDENING
-vlan 200
- name TRANSIT_L3_WAN
-!
-! --- GATEWAYS SVI DE ALTA CAPACIDADE (/22 E /30) ---
-interface Vlan10
- description GW_SOC_NOC
- ip address 172.16.0.1 255.255.252.0
- no shutdown
-!
-interface Vlan20
- description GW_FINANCIAL_CORE
- ip address 172.16.4.1 255.255.252.0
- no shutdown
-!
-interface Vlan30
- description GW_MARKET_ANALYTICS
- ip address 172.16.8.1 255.255.252.0
- no shutdown
-!
-interface Vlan40
- description GW_AUDIT_COMPLIANCE
- ip address 172.16.12.1 255.255.252.0
- no shutdown
-!
-interface Vlan99
- description GW_SWITCH_MANAGEMENT
- ip address 172.16.99.1 255.255.255.0
- no shutdown
-!
-interface Vlan200
- description TRANSIT_L3_ROUTER_EDGE
- ip address 172.16.16.1 255.255.255.252
- no shutdown
-!
-! --- SERVIDOR DHCP NATIVO COM EXCLUSÃO DE INFRAESTRUTURA ---
-ip dhcp excluded-address 172.16.0.1 172.16.0.50
-ip dhcp excluded-address 172.16.4.1 172.16.4.50
-ip dhcp excluded-address 172.16.8.1 172.16.8.50
-ip dhcp excluded-address 172.16.12.1 172.16.12.50
-!
-ip dhcp pool POOL_SEC_OPS
- network 172.16.0.0 255.255.252.0
- default-router 172.16.0.1
- dns-server 172.16.32.10
-!
-ip dhcp pool POOL_FINANCIAL
- network 172.16.4.0 255.255.252.0
- default-router 172.16.4.1
- dns-server 172.16.32.10
-!
-ip dhcp pool POOL_ANALYTICS
- network 172.16.8.0 255.255.252.0
- default-router 172.16.8.1
- dns-server 172.16.32.10
-!
-ip dhcp pool POOL_AUDIT
- network 172.16.12.0 255.255.252.0
- default-router 172.16.12.1
- dns-server 172.16.32.10
-!
-! --- INTERFACES FÍSICAS ---
-interface GigabitEthernet1/0/1
- description TRUNK_UPLINK_HQ_ACCESS_2960
- switchport trunk encapsulation dot1q
- switchport mode trunk
- switchport trunk allowed vlan 10,20,30,40,99
- switchport nonegotiate
- no shutdown
-!
-interface GigabitEthernet1/0/2
- description LINK_TRANSITO_L3_EDGE_ROUTER
- switchport mode access
- switchport access vlan 200
- no shutdown
-!
-! --- ROTEAMENTO OSPF AREA 0 ---
-router ospf 1
- router-id 1.1.1.1
- network 172.16.0.0 0.0.3.255 area 0
- network 172.16.4.0 0.0.3.255 area 0
- network 172.16.8.0 0.0.3.255 area 0
- network 172.16.12.0 0.0.3.255 area 0
- network 172.16.99.0 0.0.0.255 area 0
- network 172.16.16.0 0.0.0.3 area 0
-!
-! --- BASELINE DE HARDENING SSHv2 ---
-ip domain-name anbima.corp
-crypto key generate rsa modulus 2048
-ip ssh version 2
-ip ssh time-out 60
-ip ssh authentication-retries 4
-username ADMIN privilege 15 secret ANBIMA@SEC2026!
-!
-line vty 0 4
- login local
- transport input ssh
-!
-end
+
+ENABLE
+CONF T
+HOSTNAME HQ-Core-3650
+NO ENABLE PASSWORD
+ENABLE SECRET CISCO
+
+! 1. ATIVACAO DO ROTEAMENTO L3
+IP ROUTING
+
+! 2. CRIACAO DAS VLANS
+VLAN 10
+ NAME SEC_OPERATIONS
+VLAN 20
+ NAME FINANCIAL_CORE
+VLAN 30
+ NAME ANALYTICS_DATA
+VLAN 40
+ NAME AUDIT_COMPLIANCE
+VLAN 99
+ NAME MGMT_HARDENING
+VLAN 200
+ NAME TRANSIT_L3_WAN
+EXIT
+
+! 3. GATEWAYS SVI (/22 E /30)
+INT VLAN 10
+ IP ADDRESS 172.16.0.1 255.255.252.0
+ NO SHUT
+INT VLAN 20
+ IP ADDRESS 172.16.4.1 255.255.252.0
+ NO SHUT
+INT VLAN 30
+ IP ADDRESS 172.16.8.1 255.255.252.0
+ NO SHUT
+INT VLAN 40
+ IP ADDRESS 172.16.12.1 255.255.252.0
+ NO SHUT
+INT VLAN 99
+ IP ADDRESS 172.16.99.1 255.255.255.0
+ NO SHUT
+INT VLAN 200
+ IP ADDRESS 172.16.16.1 255.255.255.252
+ NO SHUT
+EXIT
+
+! 4. SERVIDOR DHCP NATIVO
+IP DHCP EXCLUDED-ADDRESS 172.16.0.1 172.16.0.50
+IP DHCP EXCLUDED-ADDRESS 172.16.4.1 172.16.4.50
+IP DHCP EXCLUDED-ADDRESS 172.16.8.1 172.16.8.50
+IP DHCP EXCLUDED-ADDRESS 172.16.12.1 172.16.12.50
+
+IP DHCP POOL POOL_SEC_OPS
+ NETWORK 172.16.0.0 255.255.252.0
+ DEFAULT-ROUTER 172.16.0.1
+ DNS-SERVER 172.16.32.10
+EXIT
+
+IP DHCP POOL POOL_FINANCIAL
+ NETWORK 172.16.4.0 255.255.252.0
+ DEFAULT-ROUTER 172.16.4.1
+ DNS-SERVER 172.16.32.10
+EXIT
+
+IP DHCP POOL POOL_ANALYTICS
+ NETWORK 172.16.8.0 255.255.252.0
+ DEFAULT-ROUTER 172.16.8.1
+ DNS-SERVER 172.16.32.10
+EXIT
+
+IP DHCP POOL POOL_AUDIT
+ NETWORK 172.16.12.0 255.255.252.0
+ DEFAULT-ROUTER 172.16.12.1
+ DNS-SERVER 172.16.32.10
+EXIT
+
+! 5. PORTAS FISICAS[cite: 1]
+INT G1/0/1
+ SWITCHPORT MODE TRUNK
+ SWITCHPORT TRUNK ALLOWED VLAN 10,20,30,40,99
+ NO SHUT
+EXIT
+
+INT G1/0/2
+ SWITCHPORT MODE ACCESS
+ SWITCHPORT ACCESS VLAN 200
+ NO SHUT
+EXIT
+
+! 6. OSPF AREA 0[cite: 1]
+ROUTER OSPF 1
+ ROUTER-ID 1.1.1.1
+ NETWORK 172.16.0.0 0.0.3.255 AREA 0
+ NETWORK 172.16.4.0 0.0.3.255 AREA 0
+ NETWORK 172.16.8.0 0.0.3.255 AREA 0
+ NETWORK 172.16.12.0 0.0.3.255 AREA 0
+ NETWORK 172.16.99.0 0.0.0.255 AREA 0
+ NETWORK 172.16.16.0 0.0.0.3 AREA 0
+EXIT
+
+! 7. HARDENING SSHv2[cite: 1]
+IP DOMAIN-NAME ANBIMA.CORP
+CRYPTO KEY GENERATE RSA
+2048
+IP SSH VERSION 2
+USERNAME ADMIN PRIVILEGE 15 SECRET ANBIMA@SEC2026!
+LINE VTY 0 4
+ LOGIN LOCAL
+ TRANSPORT INPUT SSH
+ IP SSH TIME-OUT 60
+ IP SSH AUTHENTICATION-RETRIES 4
+EXIT
