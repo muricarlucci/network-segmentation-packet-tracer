@@ -1,4 +1,4 @@
-# Arquitetura de Rede Corporativa Resiliente e Segmentada — ANBIMA Financial Hub
+# Arquitetura de Rede Corporativa Resiliente e Segmentada • ANBIMA Financial Hub
 
 [![Security Baseline: CIS Controls v8](https://img.shields.io/badge/Security-CIS%20Controls%20v8-blue)](https://www.cisecurity.org/)
 [![Compliance: BACEN 4.893](https://img.shields.io/badge/Compliance-BACEN%204.893-darkgreen)](#-conformidade-regulatória-e-segurança-defensiva)
