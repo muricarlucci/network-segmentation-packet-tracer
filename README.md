@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="assets/.banner/banner_readme.png" alt="Network Segmentation Packet Tracer Banner" width="100%">
+</p>
 # Arquitetura de Rede Corporativa Resiliente e Segmentada • ANBIMA Financial Hub
 
 [![Security Baseline: CIS Controls v8](https://img.shields.io/badge/Security-CIS%20Controls%20v8-blue)](https://www.cisecurity.org/)
