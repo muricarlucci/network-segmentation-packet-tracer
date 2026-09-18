@@ -1,1388 +1,73 @@
-# 🔎 Verification Playbook — PROJETO ANIBIA
+# Verification Playbook — Validação Operacional da Infraestrutura ANBIMA
 
-> **Referência operacional para validação da infraestrutura de rede simulada no Cisco Packet Tracer.**
->
-> Este documento reúne os comandos de verificação necessários para confirmar o funcionamento dos principais componentes da topologia: interfaces, VLANs, roteamento L3, DHCP, OSPF, eBGP, redistribuição de rotas, contingência WAN e hardening SSHv2.
+[![Routing: OSPFv2 + eBGP](https://img.shields.io/badge/Routing-OSPFv2%20%2B%20eBGP-red)](#-1-convergência-da-malha-de-roteamento)
+[![Resilience: WAN Ring](https://img.shields.io/badge/Resilience-WAN%20Ring-blue)](#-3-teste-de-tolerância-a-falhas-wan)
+[![DHCP: Core Services](https://img.shields.io/badge/Services-DHCP%20Core-orange)](#-2-validação-do-dhcp-core)
+[![Hardening: SSHv2](https://img.shields.io/badge/Hardening-SSHv2-darkgreen)](#-4-validação-do-hardening)
 
----
+Playbook de validação da infraestrutura corporativa simulada da ANBIMA no Cisco Packet Tracer. Este documento consolida os procedimentos de verificação da malha OSPF, do peering eBGP, da entrega dinâmica de endereçamento via DHCP, da redundância WAN por rotas estáticas flutuantes e dos mecanismos de hardening aplicados aos ativos gerenciáveis.
 
-## 📌 Objetivo
-
-O **Verification Playbook** é utilizado após a configuração dos dispositivos para verificar se a infraestrutura implementada corresponde ao comportamento definido no cenário do **PROJETO ANIBIA**.
-
-A validação deve ser realizada diretamente nos equipamentos através do **CLI do Cisco Packet Tracer**, utilizando comandos `show`, testes de conectividade e, no caso do failover, uma simulação controlada de falha.
-
-### Escopo da verificação
-
-| Área              | O que será validado                                |
-| :---------------- | :------------------------------------------------- |
-| 🔌 Interfaces     | Estado físico e lógico das interfaces              |
-| 🧩 VLANs          | Existência e associação das VLANs                  |
-| 🔀 Trunks         | Transporte das VLANs entre Core e Access           |
-| 🌐 L3             | SVIs, interfaces de trânsito e endereçamento       |
-| 📡 DHCP           | Pools e entrega dinâmica de endereços              |
-| 🛰️ OSPF          | Adjacências, redes anunciadas e rotas              |
-| 🌎 eBGP           | Sessão entre HQ e CPD                              |
-| 🔄 Redistribuição | Integração OSPF ↔ BGP no HQ-Edge-RTR               |
-| 🛡️ Contingência  | Rotas estáticas flutuantes com AD 115              |
-| 💻 Conectividade  | Comunicação entre segmentos e CPD                  |
-| 🔐 Hardening      | SSHv2, autenticação local e parâmetros de acesso   |
-| 🧪 Failover       | Continuidade da comunicação durante falha da WAN 1 |
+A validação considera os três sítios da arquitetura — **Matriz SP**, **Filial Regional RJ** e **CPD Regulatório/Datacenter** — e deve ser executada preservando a topologia, os endereços e os papéis definidos no projeto.
 
 ---
 
-# 🗺️ 1. Ordem Recomendada de Verificação
+## 🏛️ 1. Visão Geral do Processo de Validação
 
-Para evitar diagnosticar um protocolo de roteamento quando o problema está em uma interface ou VLAN, recomenda-se seguir a sequência abaixo:
+A validação operacional segue quatro frentes principais:
 
-```text
-┌───────────────────────────┐
-│ 1. Interfaces e IPs       │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 2. VLANs e Trunks         │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 3. SVIs / Routing L3      │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 4. DHCP                   │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 5. OSPF                   │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 6. eBGP                   │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 7. Redistribuição         │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 8. Conectividade          │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 9. Failover WAN           │
-└─────────────┬─────────────┘
-              ↓
-┌───────────────────────────┐
-│ 10. Hardening SSHv2       │
-└───────────────────────────┘
+```mermaid
+flowchart TD
+    A["Infraestrutura ANBIMA"] --> B["1. Roteamento"]
+    A --> C["2. DHCP"]
+    A --> D["3. Resiliência WAN"]
+    A --> E["4. Hardening"]
+
+    B --> B1["OSPFv2<br/>Área 0"]
+    B --> B2["eBGPv4<br/>AS 65001 ↔ AS 65002"]
+    B --> B3["Redistribuição<br/>OSPF ↔ BGP"]
+
+    C --> C1["DHCP Core SP"]
+    C --> C2["DHCP Core RJ"]
+    C --> C3["Gateway SVI"]
+    C --> C4["DNS 172.16.32.10"]
+
+    D --> D1["WAN 1<br/>10.0.0.0/30"]
+    D --> D2["Falha Se0/3/0 RJ"]
+    D --> D3["AD 115"]
+    D --> D4["WAN 2<br/>10.0.0.4/30"]
+
+    E --> E1["SSHv2"]
+    E --> E2["RSA 2048"]
+    E --> E3["VTY / Login Local"]
+    E --> E4["Timeout 60s / 4 tentativas"]
 ```
+
+### Ativos diretamente envolvidos
+
+| Localidade     | Ativo                  | Modelo             | Função na validação                                      |
+| :------------- | :--------------------- | :----------------- | :------------------------------------------------------- |
+| **Matriz SP**  | `HQ-Edge-RTR`          | Cisco 2911         | OSPF, eBGP, redistribuição e terminação WAN 1/WAN 3      |
+| **Matriz SP**  | `HQ-Core-3650`         | Catalyst 3650-24PS | SVIs, DHCP, OSPF e trânsito L3                           |
+| **Matriz SP**  | `HQ-Access-2960`       | Catalyst 2960-24TT | VLANs, trunk 802.1Q e gerenciamento                      |
+| **Filial RJ**  | `Branch-Edge-RTR`      | Cisco 2911         | OSPF, rotas flutuantes AD 115 e WAN 1/WAN 2              |
+| **Filial RJ**  | `Branch-Core-3650`     | Catalyst 3650-24PS | SVIs, DHCP, OSPF e default route                         |
+| **Filial RJ**  | `Branch-Access-2960`   | Catalyst 2960-24TT | VLANs, trunk 802.1Q e gerenciamento                      |
+| **Datacenter** | `CPD-Datacenter-RTR`   | Cisco 2911         | eBGP, WAN 2/WAN 3, LAN CPD e Loopback 0                  |
+| **Datacenter** | `Server-Financial-Hub` | Cisco Server PT    | Liquidação, banco de dados regulatório e DNS corporativo |
 
 ---
 
-# 🔌 2. Verificação de Interfaces
-
-## 2.1 Comando principal
-
-Executar nos roteadores e switches:
-
-```cisco
-show ip interface brief
-```
-
-### O que verificar
-
-A coluna **Status** deve indicar que a interface está operacional e a coluna **Protocol** deve indicar que o protocolo da interface está ativo.
-
-### Interfaces importantes
-
-#### HQ-Edge-RTR
-
-| Interface | Endereço         |
-| :-------- | :--------------- |
-| `Gig0/0`  | `172.16.16.2/30` |
-| `Se0/3/0` | `10.0.0.1/30`    |
-| `Se0/3/1` | `10.0.0.10/30`   |
-
-#### Branch-Edge-RTR
-
-| Interface | Endereço        |
-| :-------- | :-------------- |
-| `Gig0/0`  | `172.19.4.2/30` |
-| `Se0/3/1` | `10.0.0.2/30`   |
-| `Se0/3/0` | `10.0.0.5/30`   |
-
-#### CPD-Datacenter-RTR
-
-| Interface   | Endereço           |
-| :---------- | :----------------- |
-| `Gig0/0`    | `172.16.32.1/22`   |
-| `Loopback0` | `192.168.100.1/32` |
-| `Se0/3/0`   | `10.0.0.9/30`      |
-| `Se0/3/1`   | `10.0.0.6/30`      |
-
----
-
-## 2.2 Verificação detalhada de uma interface
-
-Quando houver dúvida sobre uma interface específica:
-
-```cisco
-show interfaces <interface>
-```
-
-Exemplo:
-
-```cisco
-show interfaces Se0/3/0
-```
-
-Para interfaces seriais DCE, conferir também a configuração de clock:
-
-```cisco
-show controllers serial 0/3/0
-```
-
-No cenário, as interfaces DCE utilizam:
-
-```text
-clock rate 64000
-```
-
----
-
-# 🧩 3. Verificação de VLANs
-
-Nos switches:
-
-```cisco
-show vlan brief
-```
-
-## 3.1 HQ
-
-Devem existir:
-
-|  VLAN | Nome               |
-| :---: | :----------------- |
-|  `10` | `SEC_OPERATIONS`   |
-|  `20` | `FINANCIAL_CORE`   |
-|  `30` | `ANALYTICS_DATA`   |
-|  `40` | `AUDIT_COMPLIANCE` |
-|  `99` | `MGMT_HARDENING`   |
-| `200` | `TRANSIT_L3_WAN`   |
-
-## 3.2 RJ
-
-Devem existir:
-
-|  VLAN | Nome            |
-| :---: | :-------------- |
-|  `10` | `RJ_SUPERVISAO` |
-|  `20` | `RJ_OPERATIONS` |
-|  `99` | `RJ_MGMT`       |
-| `200` | `RJ_TRANSIT_L3` |
-
----
-
-# 🔀 4. Verificação dos Trunks
-
-## 4.1 Comando
-
-Nos switches:
-
-```cisco
-show interfaces trunk
-```
-
-### HQ
-
-O trunk entre `HQ-Core-3650` e `HQ-Access-2960` deve transportar:
-
-```text
-VLAN 10
-VLAN 20
-VLAN 30
-VLAN 40
-VLAN 99
-```
-
-### RJ
-
-O trunk entre `Branch-Core-3650` e `Branch-Access-2960` deve transportar:
-
-```text
-VLAN 10
-VLAN 20
-VLAN 99
-```
-
----
-
-## 4.2 Verificação da configuração da interface
-
-Também pode ser utilizado:
-
-```cisco
-show running-config interface Gig1/0/1
-```
-
-No Core, o enlace com o Access deve estar configurado como trunk.
-
-No Access, o uplink deve estar configurado como trunk.
-
----
-
-# 🌐 5. Verificação do Roteamento L3
-
-Os switches Core são responsáveis pelo roteamento L3 e hospedam as SVIs utilizadas como gateways das VLANs.
-
-## 5.1 HQ-Core-3650
-
-```cisco
-show ip interface brief
-```
-
-Conferir:
-
-| SVI       | Endereço         |
-| :-------- | :--------------- |
-| `Vlan10`  | `172.16.0.1/22`  |
-| `Vlan20`  | `172.16.4.1/22`  |
-| `Vlan30`  | `172.16.8.1/22`  |
-| `Vlan40`  | `172.16.12.1/22` |
-| `Vlan99`  | `172.16.99.1/24` |
-| `Vlan200` | `172.16.16.1/30` |
-
-Confirmar também que o roteamento L3 está habilitado:
-
-```cisco
-show running-config | include ip routing
-```
-
----
-
-## 5.2 Branch-Core-3650
-
-```cisco
-show ip interface brief
-```
-
-Conferir:
-
-| SVI       | Endereço         |
-| :-------- | :--------------- |
-| `Vlan10`  | `172.19.0.1/23`  |
-| `Vlan20`  | `172.19.2.1/23`  |
-| `Vlan99`  | `172.19.99.1/24` |
-| `Vlan200` | `172.19.4.1/30`  |
-
-Confirmar:
-
-```cisco
-show running-config | include ip routing
-```
-
----
-
-# 📡 6. Verificação do DHCP
-
-Os dois switches Core atuam como servidores DHCP locais.
-
-## 6.1 HQ-Core-3650
-
-Executar:
-
-```cisco
-show ip dhcp pool
-```
-
-Devem existir os pools:
-
-```text
-POOL_SEC_OPS
-POOL_FINANCIAL
-POOL_ANALYTICS
-POOL_AUDIT
-```
-
-Para visualizar os bindings:
-
-```cisco
-show ip dhcp binding
-```
-
-Para verificar conflitos:
-
-```cisco
-show ip dhcp conflict
-```
-
----
-
-## 6.2 Parâmetros esperados — HQ
-
-### VLAN 10
-
-```text
-Network:       172.16.0.0/22
-Gateway:       172.16.0.1
-DNS:           172.16.32.10
-Pool inicial:  172.16.0.51
-```
-
-### VLAN 20
-
-```text
-Network:       172.16.4.0/22
-Gateway:       172.16.4.1
-DNS:           172.16.32.10
-Pool inicial:  172.16.4.51
-```
-
-### VLAN 30
-
-```text
-Network:       172.16.8.0/22
-Gateway:       172.16.8.1
-DNS:           172.16.32.10
-Pool inicial:  172.16.8.51
-```
-
-### VLAN 40
-
-```text
-Network:       172.16.12.0/22
-Gateway:       172.16.12.1
-DNS:           172.16.32.10
-Pool inicial:  172.16.12.51
-```
-
-Os primeiros 50 endereços de cada rede departamental são excluídos do DHCP.
-
----
-
-## 6.3 Branch-Core-3650
-
-Executar:
-
-```cisco
-show ip dhcp pool
-```
-
-Devem existir:
-
-```text
-POOL_RJ_SUPERVISAO
-POOL_RJ_OPERATIONS
-```
-
-E:
-
-```cisco
-show ip dhcp binding
-```
-
-### VLAN 10 — Supervisão
-
-```text
-Network:       172.19.0.0/23
-Gateway:       172.19.0.1
-DNS:           172.16.32.10
-Pool inicial:  172.19.0.51
-```
-
-### VLAN 20 — Operações
-
-```text
-Network:       172.19.2.0/23
-Gateway:       172.19.2.1
-DNS:           172.16.32.10
-Pool inicial:  172.19.2.51
-```
-
----
-
-# 🛰️ 7. Verificação do OSPF
-
-O projeto utiliza **OSPFv2**, com **processo 1** e **Area 0**.
-
-## 7.1 Verificar vizinhos
-
-Nos equipamentos participantes:
-
-```cisco
-show ip ospf neighbor
-```
-
-### Resultado esperado
-
-As adjacências OSPF estabelecidas devem aparecer em estado:
-
-```text
-FULL
-```
-
----
-
-## 7.2 Verificar o processo OSPF
-
-```cisco
-show ip protocols
-```
-
-Esse comando permite verificar informações do processo de roteamento, incluindo:
-
-* processo OSPF;
-* Router ID;
-* redes anunciadas;
-* área utilizada;
-* redistribuição configurada.
-
----
-
-## 7.3 Verificar informações do OSPF
-
-```cisco
-show ip ospf
-```
-
-Conferir principalmente:
-
-```text
-Process ID: 1
-Area: 0
-```
-
----
-
-## 7.4 Verificar rotas aprendidas pelo OSPF
-
-```cisco
-show ip route ospf
-```
-
-As rotas identificadas pela letra:
-
-```text
-O
-```
-
-são rotas aprendidas através do OSPF.
-
----
-
-# 🌎 8. Verificação do eBGP
-
-O eBGP é utilizado entre:
-
-```text
-HQ-Edge-RTR
-AS 65001
-10.0.0.10
-       │
-       │ WAN 3
-       │
-10.0.0.9
-CPD-Datacenter-RTR
-AS 65002
-```
-
-## 8.1 Verificar a sessão BGP
-
-No `HQ-Edge-RTR`:
-
-```cisco
-show ip bgp summary
-```
-
-No `CPD-Datacenter-RTR`:
-
-```cisco
-show ip bgp summary
-```
-
-### O que verificar
-
-A sessão entre:
-
-```text
-10.0.0.10
-```
-
-e
-
-```text
-10.0.0.9
-```
-
-deve estar estabelecida.
-
-O ASN remoto deve corresponder a:
-
-```text
-HQ → AS 65002
-CPD → AS 65001
-```
-
----
-
-## 8.2 Verificar a tabela BGP
-
-```cisco
-show ip bgp
-```
-
-No CPD, devem estar presentes os prefixos configurados para anúncio:
-
-```text
-172.16.32.0/22
-192.168.100.1/32
-10.0.0.4/30
-```
-
----
-
-# 🔄 9. Verificação da Redistribuição OSPF ↔ BGP
-
-O ponto de integração entre os dois domínios de roteamento é o:
-
-```text
-HQ-Edge-RTR
-```
-
-## 9.1 BGP → OSPF
-
-No `HQ-Edge-RTR`:
-
-```cisco
-show running-config | section router ospf
-```
-
-Deve existir a redistribuição:
-
-```cisco
-redistribute bgp 65001 subnets
-```
-
-A finalidade é permitir que as rotas aprendidas pelo BGP do CPD sejam disponibilizadas à malha OSPF.
-
----
-
-## 9.2 OSPF → BGP
-
-No `HQ-Edge-RTR`:
-
-```cisco
-show running-config | section router bgp
-```
-
-Deve existir:
-
-```cisco
-redistribute ospf 1
-```
-
-A finalidade é permitir que as redes corporativas aprendidas via OSPF sejam disponibilizadas ao domínio BGP.
-
----
-
-## 9.3 Conferência na tabela de roteamento
-
-```cisco
-show ip route
-```
-
-A tabela deve permitir verificar a presença de rotas provenientes dos diferentes mecanismos de roteamento utilizados no projeto.
-
-Para consultar uma rede específica:
-
-```cisco
-show ip route 172.16.32.0
-```
-
-ou:
-
-```cisco
-show ip route 192.168.100.1
-```
-
----
-
-# 🔗 10. Verificação das Rotas de Contingência
-
-O `Branch-Edge-RTR` utiliza rotas estáticas flutuantes com:
-
-```text
-Administrative Distance = 115
-```
-
-O OSPF utiliza:
-
-```text
-Administrative Distance = 110
-```
-
-Por isso, as rotas estáticas com AD 115 funcionam como contingência quando as rotas OSPF correspondentes deixam de estar disponíveis.
-
-## 10.1 Conferir configuração
-
-No `Branch-Edge-RTR`:
-
-```cisco
-show running-config | include ip route
-```
-
-Devem existir as rotas:
-
-```cisco
-ip route 172.16.0.0 255.255.240.0 10.0.0.1 115
-ip route 172.16.99.0 255.255.255.0 10.0.0.1 115
-ip route 172.16.32.0 255.255.252.0 10.0.0.6 115
-ip route 192.168.100.1 255.255.255.255 10.0.0.6 115
-```
-
----
-
-## 10.2 Verificar redistribuição das rotas estáticas
-
-```cisco
-show running-config | section router ospf
-```
-
-Deve existir:
-
-```cisco
-redistribute static subnets
-```
-
----
-
-## 10.3 Verificar a rota default do Core RJ
-
-No `Branch-Core-3650`:
-
-```cisco
-show running-config | include ip route
-```
-
-Deve existir:
-
-```cisco
-ip route 0.0.0.0 0.0.0.0 172.19.4.2
-```
-
----
-
-# 🧪 11. Testes de Conectividade
-
-## 11.1 Teste do enlace HQ ↔ RJ
-
-No `HQ-Edge-RTR`:
-
-```cisco
-ping 10.0.0.2
-```
-
-No `Branch-Edge-RTR`:
-
-```cisco
-ping 10.0.0.1
-```
-
----
-
-## 11.2 Teste do enlace RJ ↔ CPD
-
-No `Branch-Edge-RTR`:
-
-```cisco
-ping 10.0.0.6
-```
-
-No `CPD-Datacenter-RTR`:
-
-```cisco
-ping 10.0.0.5
-```
-
----
-
-## 11.3 Teste do enlace HQ ↔ CPD
-
-No `HQ-Edge-RTR`:
-
-```cisco
-ping 10.0.0.9
-```
-
-No `CPD-Datacenter-RTR`:
-
-```cisco
-ping 10.0.0.10
-```
-
----
-
-## 11.4 Teste do servidor do CPD
-
-A partir de um equipamento que possua conectividade com o CPD:
-
-```cisco
-ping 172.16.32.10
-```
-
-O servidor utilizado no cenário é:
-
-```text
-Server-Financial-Hub
-172.16.32.10
-```
-
----
-
-## 11.5 Teste da Loopback do CPD
-
-```cisco
-ping 192.168.100.1
-```
-
-A Loopback 0 está configurada no `CPD-Datacenter-RTR` como:
-
-```text
-192.168.100.1/32
-```
-
----
-
-# 🛣️ 12. Verificação do Caminho Percorrido
-
-Para analisar o caminho até o servidor do CPD:
-
-```cisco
-traceroute 172.16.32.10
-```
-
-Esse teste pode ser utilizado antes e depois da simulação de falha WAN para observar a alteração do caminho.
-
----
-
-# 🔥 13. Teste de Failover WAN
-
-> **⚠️ Este é um teste destrutivo/controlado.**
->
-> A interface será administrativamente desativada durante a simulação. Execute somente após validar que o cenário nominal está funcionando.
-
-O cenário utiliza:
-
-```text
-PC-RJ-Ops-01
-172.19.2.51
-```
-
-como origem e:
-
-```text
-Server-Financial-Hub
-172.16.32.10
-```
-
-como destino.
-
----
-
-## 13.1 Estado nominal
-
-No `PC-RJ-Ops-01`, iniciar um ping contínuo:
-
-```text
-ping 172.16.32.10 -t
-```
-
-O objetivo é manter tráfego ICMP durante todo o teste.
-
-O cenário nominal utiliza a conectividade pela WAN 1 em direção à Matriz e posteriormente pela WAN 3 até o CPD.
-
----
-
-## 13.2 Identificar a interface que será desativada
-
-No `Branch-Edge-RTR`:
-
-```cisco
-show ip interface brief
-```
-
-A interface da WAN 1 é:
-
-```text
-Se0/3/1
-10.0.0.2/30
-```
-
----
-
-## 13.3 Injetar a falha
-
-No `Branch-Edge-RTR`:
-
-```cisco
-enable
-configure terminal
-interface Se0/3/0
-shutdown
-```
-
-> **Importante:** no cenário, a falha é simulada através da desativação da interface `Se0/3/0` do `Branch-Edge-RTR`, correspondente ao enlace WAN 2. A documentação do cenário também descreve a WAN 1 como o enlace primário RJ ↔ HQ através da `Se0/3/1`. Portanto, preserve exatamente a interface indicada pelo procedimento/teste que estiver sendo reproduzido no arquivo `.pkt`.
-
----
-
-## 13.4 Observar a convergência
-
-Enquanto o ping contínuo estiver sendo executado, observar:
-
-```cisco
-show ip ospf neighbor
-```
-
-e:
-
-```cisco
-show ip route
-```
-
-No `Branch-Edge-RTR`, verificar a alteração da tabela de roteamento após a perda da conectividade correspondente.
-
-Também pode ser utilizado:
-
-```cisco
-show ip route 172.16.32.0
-```
-
-para acompanhar especificamente a rota para a LAN do CPD.
-
----
-
-## 13.5 Resultado esperado pelo cenário
-
-O cenário descreve uma perda transitória de aproximadamente:
-
-```text
-1–2 pacotes ICMP
-```
-
-durante a expiração do Dead Interval do OSPF.
-
-Após a convergência, as rotas estáticas com:
-
-```text
-AD 115
-```
-
-devem assumir a função de contingência.
-
-Para o acesso ao CPD, o caminho alternativo utiliza a:
-
-```text
-WAN 2
-```
-
-através do próximo salto:
-
-```text
-10.0.0.6
-```
-
----
-
-## 13.6 Restaurar a interface
-
-Após finalizar o teste:
-
-```cisco
-configure terminal
-interface Se0/3/0
-no shutdown
-```
-
-Confirmar:
-
-```cisco
-show ip interface brief
-```
-
-Depois verificar novamente:
-
-```cisco
-show ip ospf neighbor
-```
-
-e:
-
-```cisco
-show ip route
-```
-
-O objetivo é confirmar o retorno ao estado operacional normal.
-
----
-
-# 🔐 14. Verificação do Hardening SSHv2
-
-Todos os sete ativos gerenciáveis do cenário possuem parâmetros de hardening.
-
-## 14.1 Verificar domínio
-
-```cisco
-show running-config | include ip domain-name
-```
-
-Esperado:
-
-```text
-ip domain-name anbima.corp
-```
-
----
-
-## 14.2 Verificar versão do SSH
-
-```cisco
-show ip ssh
-```
-
-Conferir:
-
-```text
-SSH version 2
-```
-
----
-
-## 14.3 Verificar parâmetros SSH
-
-O comando:
-
-```cisco
-show ip ssh
-```
-
-deve ser utilizado para conferir os parâmetros ativos do serviço SSH.
-
-O cenário define:
-
-| Parâmetro                  | Valor         |
-| :------------------------- | :------------ |
-| Versão                     | SSHv2         |
-| Timeout                    | `60` segundos |
-| Tentativas de autenticação | `4`           |
-| Chave RSA                  | `2048` bits   |
-
----
-
-## 14.4 Verificar acesso VTY
-
-```cisco
-show running-config | section line vty
-```
-
-Deve existir a configuração:
-
-```cisco
-line vty 0 4
- login local
- transport input ssh
- ip ssh time-out 60
- ip ssh authentication-retries 4
-```
-
-O objetivo é confirmar que o acesso remoto está limitado ao SSH e utiliza autenticação local.
-
----
-
-## 14.5 Verificar usuário administrativo
-
-```cisco
-show running-config | include username
-```
-
-O cenário utiliza:
-
-```text
-username ADMIN privilege 15
-```
-
-com credencial definida no script de configuração.
-
----
-
-# 🖥️ 15. Verificação dos Switches de Acesso
-
-## HQ-Access-2960
-
-### VLANs
-
-```cisco
-show vlan brief
-```
-
-### Trunk
-
-```cisco
-show interfaces trunk
-```
-
-### IP de gerenciamento
-
-```cisco
-show ip interface brief
-```
-
-A interface VLAN 99 deve utilizar:
-
-```text
-172.16.99.2/24
-```
-
-### Gateway
-
-```cisco
-show running-config | include ip default-gateway
-```
-
-Esperado:
-
-```text
-ip default-gateway 172.16.99.1
-```
-
----
-
-## Branch-Access-2960
-
-### VLANs
-
-```cisco
-show vlan brief
-```
-
-### Trunk
-
-```cisco
-show interfaces trunk
-```
-
-### IP de gerenciamento
-
-```cisco
-show ip interface brief
-```
-
-A interface VLAN 99 deve utilizar:
-
-```text
-172.19.99.2/24
-```
-
-### Gateway
-
-```cisco
-show running-config | include ip default-gateway
-```
-
-Esperado:
-
-```text
-ip default-gateway 172.19.99.1
-```
-
----
-
-# 🧾 16. Checklist Operacional
-
-Utilize este checklist para registrar a validação final.
-
-## Infraestrutura
-
-* [ ] Todos os equipamentos estão ligados.
-* [ ] Interfaces necessárias estão `up/up`.
-* [ ] Endereços IP correspondem ao plano definido.
-* [ ] Interfaces DCE possuem `clock rate 64000`.
-* [ ] VLANs esperadas existem.
-* [ ] Portas de acesso estão associadas às VLANs corretas.
-* [ ] Trunks estão operacionais.
-* [ ] SVIs estão ativas.
-* [ ] `ip routing` está ativo nos Core 3650.
-
-## DHCP
-
-* [ ] Pools DHCP da HQ existem.
-* [ ] Pools DHCP do RJ existem.
-* [ ] Primeiros 50 endereços estão excluídos dos pools departamentais.
-* [ ] Clientes recebem endereços dinamicamente.
-* [ ] Gateway recebido corresponde à SVI da VLAN.
-* [ ] DNS recebido é `172.16.32.10`.
-
-## OSPF
-
-* [ ] Processo OSPF 1 está ativo.
-* [ ] Área 0 está configurada.
-* [ ] Adjacências esperadas estão em `FULL`.
-* [ ] Rotas OSPF aparecem na tabela.
-* [ ] Redistribuição BGP → OSPF está configurada no HQ-Edge-RTR.
-* [ ] Redistribuição de rotas estáticas → OSPF está configurada no Branch-Edge-RTR.
-
-## BGP
-
-* [ ] HQ-Edge-RTR utiliza AS 65001.
-* [ ] CPD-Datacenter-RTR utiliza AS 65002.
-* [ ] Peering utiliza `10.0.0.10 ↔ 10.0.0.9`.
-* [ ] Sessão eBGP está estabelecida.
-* [ ] Prefixos do CPD estão presentes.
-* [ ] Redistribuição OSPF → BGP está configurada no HQ-Edge-RTR.
-
-## Contingência
-
-* [ ] Rotas estáticas com AD 115 estão configuradas no Branch-Edge-RTR.
-* [ ] Rotas estáticas são redistribuídas no OSPF.
-* [ ] Default route do Branch-Core aponta para `172.19.4.2`.
-* [ ] Ping contínuo RJ → CPD funciona no estado nominal.
-* [ ] Falha controlada pode ser reproduzida.
-* [ ] Convergência ocorre após a perda do caminho primário.
-* [ ] Comunicação com `172.16.32.10` é restabelecida.
-* [ ] Interface desativada é restaurada após o teste.
-
-## Hardening
-
-* [ ] Domínio `anbima.corp` configurado.
-* [ ] RSA 2048 configurado.
-* [ ] SSHv2 ativo.
-* [ ] `transport input ssh` configurado.
-* [ ] `login local` configurado.
-* [ ] Usuário administrativo possui privilégio 15.
-* [ ] Timeout SSH configurado para 60 segundos.
-* [ ] Authentication retries configurado para 4.
-* [ ] `enable secret` configurado.
-
----
-
-# 📸 17. Evidências Visuais
-
-As evidências devem ser capturadas diretamente do **Cisco Packet Tracer**, preferencialmente mostrando o nome do dispositivo e o comando executado no CLI.
-
-As imagens devem ser armazenadas em:
-
-```text
-assets/evidences/
-```
-
-## Evidência 01 — OSPF
-
-Arquivo:
-
-```text
-assets/evidences/ev-01-ospf-adjacency.png
-```
-
-### Capturar
-
-No equipamento com a adjacência OSPF a ser demonstrada:
-
-```cisco
-show ip ospf neighbor
-```
-
-### Evidência esperada
-
-A saída deve permitir visualizar as adjacências e o estado:
-
-```text
-FULL
-```
-
----
-
-## Evidência 02 — eBGP
-
-Arquivo:
-
-```text
-assets/evidences/ev-02-ebgp-peering-established.png
-```
-
-### Capturar
-
-No `HQ-Edge-RTR`:
-
-```cisco
-show ip bgp summary
-```
-
-A captura deve mostrar a sessão com o peer:
-
-```text
-10.0.0.9
-```
-
----
-
-## Evidência 03 — DHCP
-
-Arquivo:
-
-```text
-assets/evidences/ev-03-dhcp-core-pools.png
-```
-
-### Capturar
-
-No Core correspondente:
-
-```cisco
-show ip dhcp pool
-```
-
-Se necessário, complementar com:
-
-```cisco
-show ip dhcp binding
-```
-
----
-
-## Evidência 04 — Failover
-
-Arquivo:
-
-```text
-assets/evidences/ev-04-wan-failover-convergence.png
-```
-
-### Capturar
-
-Durante o teste:
-
-```text
-PC-RJ-Ops-01
-172.19.2.51
-```
-
-executando ping contínuo para:
-
-```text
-172.16.32.10
-```
-
-A evidência deve registrar o comportamento do ICMP durante a falha e a retomada da comunicação após a convergência.
-
----
-
-## Evidência 05 — SSHv2
-
-Arquivo:
-
-```text
-assets/evidences/ev-05-hardening-sshv2.png
-```
-
-### Capturar
-
-No equipamento validado:
-
-```cisco
-show ip ssh
-```
-
-E, quando necessário, complementar com:
-
-```cisco
-show running-config | section line vty
-```
-
-A evidência deve permitir verificar a utilização de SSHv2 e os parâmetros de acesso remoto configurados.
-
----
-
-# 🧭 18. Comandos de Referência Rápida
-
-| Objetivo                  | Comando                                     |
-| :------------------------ | :------------------------------------------ |
-| Interfaces                | `show ip interface brief`                   |
-| VLANs                     | `show vlan brief`                           |
-| Trunks                    | `show interfaces trunk`                     |
-| Configuração de interface | `show running-config interface <interface>` |
-| Tabela de roteamento      | `show ip route`                             |
-| Rotas OSPF                | `show ip route ospf`                        |
-| Vizinhos OSPF             | `show ip ospf neighbor`                     |
-| Processo OSPF             | `show ip ospf`                              |
-| Protocolos de roteamento  | `show ip protocols`                         |
-| Resumo BGP                | `show ip bgp summary`                       |
-| Tabela BGP                | `show ip bgp`                               |
-| Pools DHCP                | `show ip dhcp pool`                         |
-| Leases DHCP               | `show ip dhcp binding`                      |
-| Conflitos DHCP            | `show ip dhcp conflict`                     |
-| SSH                       | `show ip ssh`                               |
-| Configuração VTY          | `show running-config \| section line vty`   |
-| Rotas estáticas           | `show running-config \| include ip route`   |
-| Ping                      | `ping <ip>`                                 |
-| Traceroute                | `traceroute <ip>`                           |
-| Configuração completa     | `show running-config`                       |
-
----
-
-# 🏁 19. Critério de Validação Final
-
-A infraestrutura pode ser considerada **validada operacionalmente dentro do escopo do laboratório** quando os principais componentes definidos no cenário forem observados funcionando em conjunto:
-
-```text
-                    ┌──────────────────────┐
-                    │ Interfaces / VLANs   │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ Routing L3 + DHCP    │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ OSPF Area 0          │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ eBGP AS 65001/65002 │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ Redistribuição       │
-                    │ OSPF ↔ BGP           │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ Conectividade CPD    │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ Failover WAN         │
-                    │ AD 115               │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ Hardening SSHv2      │
-                    └──────────────────────┘
-```
-
-O objetivo do playbook não é apenas verificar se comandos foram configurados, mas confirmar que os componentes da arquitetura **produzem o comportamento esperado quando observados no ambiente simulado**.
-
----
-
-## 📁 Localização das Evidências
-
-Todas as capturas relacionadas aos testes deste playbook devem ser armazenadas em:
+## 🔬 2. Matriz de Validação
+
+| ID        | Domínio    | Elemento validado | Evidência esperada                                                 |
+| :-------- | :--------- | :---------------- | :----------------------------------------------------------------- |
+| **EV-01** | Routing    | OSPFv2            | Adjacências em estado `FULL`                                       |
+| **EV-02** | Routing    | eBGPv4            | Sessão estabelecida e troca de prefixos                            |
+| **EV-03** | Services   | DHCP Core         | IP iniciado em `.51`, máscara correta, gateway SVI e DNS do CPD    |
+| **EV-04** | Resilience | Failover WAN      | Perda transitória de 1–2 pacotes e utilização da WAN 2             |
+| **EV-05** | Security   | SSHv2             | Gerenciamento remoto protegido e parâmetros de hardening aplicados |
+
+Os registros gráficos correspondentes devem ser armazenados em:
 
 ```text
 assets/evidences/
@@ -1395,6 +80,829 @@ assets/evidences/
 
 ---
 
-> **PROJETO ANIBIA**
-> *Verification Playbook — Cisco Packet Tracer*
-> *Referência operacional para validação da infraestrutura de rede.*
+## 🔀 3. Convergência da Malha de Roteamento
+
+### 3.1 OSPFv2 — Área 0
+
+O OSPFv2 opera como protocolo interno da arquitetura, abrangendo os roteadores de borda e os Switches Core da Matriz e do Rio de Janeiro.
+
+A validação deve confirmar a formação das adjacências entre os elementos participantes da Área 0.
+
+### Comando de verificação
+
+Executar nos roteadores de borda:
+
+```cisco
+show ip ospf neighbor
+```
+
+### Resultado esperado
+
+A tabela de vizinhos deve apresentar as adjacências em estado:
+
+```text
+FULL
+```
+
+O estado `FULL` representa a adjacência operacional utilizada como referência no cenário para validar a convergência OSPF.
+
+### Pontos de atenção
+
+| Elemento          | Informação do projeto |
+| :---------------- | :-------------------- |
+| Processo OSPF     | `1`                   |
+| Área              | `0`                   |
+| Matriz Router-ID  | `2.2.2.2`             |
+| Filial Router-ID  | `3.3.3.3`             |
+| Core RJ Router-ID | `4.4.4.4`             |
+| Core SP Router-ID | `1.1.1.1`             |
+| WAN 1             | `10.0.0.0/30`         |
+| WAN 2             | `10.0.0.4/30`         |
+| Trânsito SP       | `172.16.16.0/30`      |
+| Trânsito RJ       | `172.19.4.0/30`       |
+
+---
+
+### 3.2 eBGPv4 — Peering entre Matriz e CPD
+
+O Datacenter opera em um Sistema Autônomo próprio:
+
+```text
+Matriz / Filial: AS 65001
+CPD:             AS 65002
+```
+
+O peering externo ocorre através da **WAN 3**:
+
+```text
+WAN 3
+10.0.0.8/30
+
+CPD-Datacenter-RTR
+10.0.0.9
+       │
+       │ TCP/179
+       │
+10.0.0.10
+HQ-Edge-RTR
+```
+
+### Comandos de verificação
+
+No `HQ-Edge-RTR`:
+
+```cisco
+show ip bgp summary
+```
+
+No `CPD-Datacenter-RTR`:
+
+```cisco
+show ip bgp summary
+```
+
+### Resultado esperado
+
+A sessão eBGP deve aparecer como estabelecida, com troca de prefixos entre os dois Sistemas Autônomos.
+
+A validação deve considerar especificamente:
+
+* vizinho `10.0.0.9` no `HQ-Edge-RTR`;
+* vizinho `10.0.0.10` no `CPD-Datacenter-RTR`;
+* AS remoto `65002` no lado da Matriz;
+* AS remoto `65001` no lado do CPD;
+* sessão sobre a WAN 3;
+* troca contínua de prefixos.
+
+### Prefixos anunciados pelo CPD
+
+O CPD anuncia para a Matriz:
+
+| Prefixo            | Finalidade                                 |
+| :----------------- | :----------------------------------------- |
+| `172.16.32.0/22`   | LAN dos servidores centrais                |
+| `10.0.0.4/30`      | Enlace de backup WAN 2                     |
+| `192.168.100.1/32` | Loopback 0 / serviço ininterrupto de teste |
+
+### Evidência
+
+Salvar a captura da sessão estabelecida em:
+
+```text
+assets/evidences/ev-02-ebgp-peering-established.png
+```
+
+---
+
+## 🔁 4. Validação da Redistribuição de Rotas
+
+A arquitetura utiliza o `HQ-Edge-RTR` como ponto de integração entre os domínios OSPF e BGP.
+
+### OSPF → BGP
+
+As redes corporativas aprendidas pelo OSPF são anunciadas para o CPD através do BGP:
+
+```cisco
+router bgp 65001
+ neighbor 10.0.0.9 remote-as 65002
+ network 172.16.0.0 mask 255.255.240.0
+ redistribute ospf 1
+exit
+```
+
+### BGP → OSPF
+
+As rotas provenientes do Datacenter são injetadas no domínio OSPF:
+
+```cisco
+router ospf 1
+ router-id 2.2.2.2
+ network 172.16.16.0 0.0.0.3 area 0
+ network 10.0.0.0 0.0.0.3 area 0
+ redistribute bgp 65001 subnets
+exit
+```
+
+### Critério de validação
+
+A comunicação entre as redes corporativas e a LAN do CPD deve permanecer possível sem exigir que os Switches Core executem BGP.
+
+O modelo de integração é:
+
+```text
+                    ┌──────────────────────┐
+                    │      HQ-Edge-RTR     │
+                    │      ASBR / AS 65001 │
+                    └──────────┬───────────┘
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+          OSPF → BGP                    BGP → OSPF
+                 │                           │
+                 ▼                           ▼
+          Redes corporativas           Redes do CPD
+                 │                           │
+                 └─────────────┬─────────────┘
+                               │
+                         WAN 3 / eBGP
+                               │
+                               ▼
+                    CPD-Datacenter-RTR
+                         AS 65002
+```
+
+---
+
+## 🧭 5. Validação das Rotas Estáticas Flutuantes
+
+A Filial RJ não executa BGP diretamente.
+
+Sua contingência é construída através de rotas estáticas flutuantes com **AD 115**.
+
+### Rotas configuradas no `Branch-Edge-RTR`
+
+```cisco
+ip route 172.16.0.0 255.255.240.0 10.0.0.1 115
+ip route 172.16.99.0 255.255.255.0 10.0.0.1 115
+ip route 172.16.32.0 255.255.252.0 10.0.0.6 115
+ip route 192.168.100.1 255.255.255.255 10.0.0.6 115
+```
+
+### Destino das contingências
+
+| Destino            | Próximo salto | Caminho     |
+| :----------------- | :------------ | :---------- |
+| `172.16.0.0/20`    | `10.0.0.1`    | Matriz SP   |
+| `172.16.99.0/24`   | `10.0.0.1`    | Matriz SP   |
+| `172.16.32.0/22`   | `10.0.0.6`    | CPD / WAN 2 |
+| `192.168.100.1/32` | `10.0.0.6`    | CPD / WAN 2 |
+
+As rotas possuem AD `115`, superior à AD `110` do OSPF. Dessa forma, permanecem como contingência enquanto o caminho OSPF preferencial estiver disponível.
+
+### Redistribuição para o OSPF local
+
+```cisco
+router ospf 1
+ redistribute static subnets
+exit
+```
+
+Esse mecanismo permite que o `Branch-Core-3650` continue alcançando os destinos remotos através do roteador regional.
+
+---
+
+# 🚨 6. Teste de Tolerância a Falhas WAN
+
+## 6.1 Objetivo
+
+Validar a continuidade de comunicação entre a Filial RJ e o CPD após a perda do enlace primário entre a Filial e a Matriz.
+
+O teste utiliza tráfego ICMP contínuo para observar a convergência da malha.
+
+---
+
+## 6.2 Cenário Nominal
+
+Origem:
+
+```text
+PC-RJ-Ops-01
+172.19.2.51
+```
+
+Destino:
+
+```text
+Server-Financial-Hub
+172.16.32.10
+```
+
+Caminho esperado antes da falha:
+
+```text
+PC-RJ-Ops-01
+172.19.2.51
+      │
+      ▼
+Branch-Access-2960
+      │
+      ▼
+Branch-Core-3650
+      │
+      ▼
+Branch-Edge-RTR
+      │
+      │ WAN 1
+      │ 10.0.0.0/30
+      ▼
+HQ-Edge-RTR
+      │
+      │ WAN 3
+      │ 10.0.0.8/30
+      ▼
+CPD-Datacenter-RTR
+      │
+      ▼
+Server-Financial-Hub
+172.16.32.10
+```
+
+### Teste
+
+A partir do `PC-RJ-Ops-01`, iniciar tráfego ICMP contínuo para:
+
+```text
+172.16.32.10
+```
+
+O tráfego deve alcançar o servidor do CPD através do caminho preferencial da WAN 1 até a Matriz e posteriormente pela WAN 3.
+
+---
+
+## 6.3 Injeção da Falha
+
+No:
+
+```text
+Branch-Edge-RTR
+```
+
+desativar manualmente:
+
+```text
+Se0/3/0
+```
+
+A interface corresponde à:
+
+```text
+WAN 2 → CPD
+```
+
+Wait: o cenário define a `Se0/3/0` do Branch como **WAN 2 para o CPD**, enquanto a `Se0/3/1` é a **WAN 1 para a Matriz**.
+
+Portanto, a sequência de teste deve preservar exatamente a interface definida no cenário:
+
+```text
+Branch-Edge-RTR
+Se0/3/1 → WAN 1 → HQ
+Se0/3/0 → WAN 2 → CPD
+```
+
+A falha utilizada para o ensaio de perda da conectividade primária deve ser aplicada conforme a interface primária efetivamente conectada à Matriz.
+
+---
+
+## 6.4 Resultado Esperado da Convergência
+
+Durante a convergência:
+
+```text
+Perda transitória:
+1–2 pacotes ICMP
+```
+
+Após a convergência:
+
+```text
+WAN 1
+   X
+   │
+   │ falha
+   ▼
+
+WAN 2
+10.0.0.5 ───────── 10.0.0.6
+Branch               CPD
+```
+
+A rota estática com **AD 115** deve assumir a tabela de roteamento para os destinos configurados e o tráfego deve ser redirecionado através da WAN 2.
+
+### Critério operacional
+
+| Etapa                    | Resultado esperado                         |
+| :----------------------- | :----------------------------------------- |
+| Antes da falha           | Comunicação ICMP contínua                  |
+| Falha do enlace          | Perda transitória                          |
+| Convergência OSPF        | Adjacência primária deixa de ser utilizada |
+| Ativação da contingência | Rotas AD 115 assumem                       |
+| Novo caminho             | WAN 2                                      |
+| Estado final             | Comunicação com o CPD restabelecida        |
+
+### Evidência
+
+Salvar a captura do teste em:
+
+```text
+assets/evidences/ev-04-wan-failover-convergence.png
+```
+
+---
+
+# 🌐 7. Validação do DHCP Core
+
+Os Switches Core Catalyst 3650 atuam como servidores DHCP locais.
+
+A política definida no projeto reserva os primeiros 50 endereços úteis de cada sub-rede departamental:
+
+```text
+.1 até .50
+```
+
+As estações recebem endereços dinâmicos a partir de:
+
+```text
+.51
+```
+
+---
+
+## 7.1 DHCP — Matriz SP
+
+### Pools
+
+| Pool             | Rede             | Gateway       | DNS            |
+| :--------------- | :--------------- | :------------ | :------------- |
+| `POOL_SEC_OPS`   | `172.16.0.0/22`  | `172.16.0.1`  | `172.16.32.10` |
+| `POOL_FINANCIAL` | `172.16.4.0/22`  | `172.16.4.1`  | `172.16.32.10` |
+| `POOL_ANALYTICS` | `172.16.8.0/22`  | `172.16.8.1`  | `172.16.32.10` |
+| `POOL_AUDIT`     | `172.16.12.0/22` | `172.16.12.1` | `172.16.32.10` |
+
+### Reservas
+
+```text
+172.16.0.1  → 172.16.0.50
+172.16.4.1  → 172.16.4.50
+172.16.8.1  → 172.16.8.50
+172.16.12.1 → 172.16.12.50
+```
+
+---
+
+## 7.2 DHCP — Filial RJ
+
+### Pools
+
+| VLAN    | Rede            | Gateway      | DNS            |
+| :------ | :-------------- | :----------- | :------------- |
+| VLAN 10 | `172.19.0.0/23` | `172.19.0.1` | `172.16.32.10` |
+| VLAN 20 | `172.19.2.0/23` | `172.19.2.1` | `172.16.32.10` |
+
+Os hosts devem iniciar a distribuição dinâmica em:
+
+```text
+172.19.0.51
+172.19.2.51
+```
+
+---
+
+## 7.3 Procedimento de Validação
+
+Para cada VLAN corporativa:
+
+1. Selecionar uma estação de trabalho.
+2. Solicitar endereço por DHCP.
+3. Confirmar o recebimento de um endereço válido.
+4. Confirmar que o endereço pertence à sub-rede correta.
+5. Confirmar que a máscara corresponde ao projeto.
+6. Confirmar que o gateway é a SVI da respectiva VLAN.
+7. Confirmar que o DNS aponta para:
+
+```text
+172.16.32.10
+```
+
+### Critérios de aceitação
+
+| Verificação   | Resultado esperado      |
+| :------------ | :---------------------- |
+| Endereço DHCP | A partir de `.51`       |
+| Gateway       | SVI correspondente      |
+| DNS           | `172.16.32.10`          |
+| SP            | Máscara `/22`           |
+| RJ            | Máscara `/23`           |
+| DHCP          | Servido pelo Core local |
+
+### Evidência
+
+Salvar a captura em:
+
+```text
+assets/evidences/ev-03-dhcp-core-pools.png
+```
+
+---
+
+# 🧩 8. Validação das VLANs e Segmentação
+
+## 8.1 Matriz SP
+
+As VLANs corporativas são:
+
+| VLAN  | Segmento                         | Rede             |
+| :---- | :------------------------------- | :--------------- |
+| `10`  | Segurança Operacional / SOC-NOC  | `172.16.0.0/22`  |
+| `20`  | Núcleo Financeiro e Liquidação   | `172.16.4.0/22`  |
+| `30`  | Dados de Mercado e Analytics     | `172.16.8.0/22`  |
+| `40`  | Auditoria e Compliance Normativo | `172.16.12.0/22` |
+| `99`  | Gerência Out-of-Band             | `172.16.99.0/24` |
+| `200` | Trânsito L3                      | `172.16.16.0/30` |
+
+O trunk entre Core e Access deve transportar:
+
+```text
+10,20,30,40,99
+```
+
+O enlace entre Core e Router utiliza a:
+
+```text
+VLAN 200
+```
+
+---
+
+## 8.2 Filial RJ
+
+| VLAN  | Segmento                           | Rede             |
+| :---- | :--------------------------------- | :--------------- |
+| `10`  | Supervisão Regional e Fiscalização | `172.19.0.0/23`  |
+| `20`  | Operações Regionais e Negócios     | `172.19.2.0/23`  |
+| `99`  | Gerência Out-of-Band               | `172.19.99.0/24` |
+| `200` | Trânsito L3                        | `172.19.4.0/30`  |
+
+O trunk entre Core e Access deve transportar:
+
+```text
+10,20,99
+```
+
+O enlace entre Core e Router utiliza:
+
+```text
+VLAN 200
+```
+
+---
+
+# 🔐 9. Validação do Gerenciamento e Hardening
+
+Todos os **7 ativos gerenciáveis** da topologia possuem parâmetros de hardening definidos no cenário.
+
+## 9.1 Parâmetros obrigatórios
+
+| Controle                   | Configuração    |
+| :------------------------- | :-------------- |
+| Protocolo de gerenciamento | SSH             |
+| Telnet                     | Desativado      |
+| SSH                        | Versão 2        |
+| RSA                        | 2048 bits       |
+| Domínio                    | `anbima.corp`   |
+| Usuário                    | `admin`         |
+| Privilégio                 | `15`            |
+| Autenticação               | Local           |
+| VTY                        | `0 4`           |
+| Timeout SSH                | `60` segundos   |
+| Tentativas de autenticação | `4`             |
+| Credencial privilegiada    | `enable secret` |
+| VLAN de gerenciamento      | `99`            |
+
+### Configuração-base de referência
+
+```cisco
+ip domain-name ANBIMA.CORP
+crypto key generate rsa
+2048
+ip ssh version 2
+username admin privilege 15 secret ANBIMA@SEC2026!
+
+line vty 0 4
+ login local
+ transport input ssh
+ ip ssh time-out 60
+ ip ssh authentication-retries 4
+exit
+```
+
+---
+
+## 9.2 Proteção das Credenciais
+
+O projeto utiliza:
+
+```cisco
+enable secret cisco
+```
+
+nos ativos do laboratório para demonstração acadêmica.
+
+A documentação do cenário diferencia essa credencial da política de produção, na qual a senha deveria possuir a mesma robustez definida para o login VTY.
+
+---
+
+## 9.3 Gerenciamento Out-of-Band
+
+### Matriz
+
+```text
+VLAN 99
+172.16.99.0/24
+
+Gateway:
+172.16.99.1
+
+HQ-Access-2960:
+172.16.99.2
+```
+
+### Filial RJ
+
+```text
+VLAN 99
+172.19.99.0/24
+
+Gateway:
+172.19.99.1
+
+Branch-Access-2960:
+172.19.99.2
+```
+
+A VLAN 99 é destinada ao gerenciamento dos switches de acesso.
+
+### Evidência
+
+Salvar a captura do estado de gerenciamento SSHv2 em:
+
+```text
+assets/evidences/ev-05-hardening-sshv2.png
+```
+
+---
+
+# 🔒 10. Validação do Trunking e Isolamento de VLANs
+
+## Matriz SP
+
+O uplink:
+
+```text
+HQ-Core-3650
+Gig1/0/1
+        │
+        │ Trunk 802.1Q
+        ▼
+HQ-Access-2960
+Gig0/1
+```
+
+transporta:
+
+```text
+VLAN 10
+VLAN 20
+VLAN 30
+VLAN 40
+VLAN 99
+```
+
+## Filial RJ
+
+O uplink:
+
+```text
+Branch-Core-3650
+Gig1/0/1
+        │
+        │ Trunk 802.1Q
+        ▼
+Branch-Access-2960
+Gig0/1
+```
+
+transporta:
+
+```text
+VLAN 10
+VLAN 20
+VLAN 99
+```
+
+A VLAN 200 permanece destinada ao trânsito L3 entre Core e roteador e não é utilizada como VLAN de usuários.
+
+---
+
+# 📡 11. Plano de Endereçamento Utilizado na Validação
+
+## Matriz SP
+
+| Elemento           | Endereço         |
+| :----------------- | :--------------- |
+| Bloco agregado     | `172.16.0.0/20`  |
+| VLAN 10            | `172.16.0.0/22`  |
+| VLAN 20            | `172.16.4.0/22`  |
+| VLAN 30            | `172.16.8.0/22`  |
+| VLAN 40            | `172.16.12.0/22` |
+| VLAN 99            | `172.16.99.0/24` |
+| VLAN 200           | `172.16.16.0/30` |
+| Core VLAN 10       | `172.16.0.1`     |
+| Core VLAN 20       | `172.16.4.1`     |
+| Core VLAN 30       | `172.16.8.1`     |
+| Core VLAN 40       | `172.16.12.1`    |
+| Core VLAN 99       | `172.16.99.1`    |
+| Core VLAN 200      | `172.16.16.1`    |
+| HQ Router VLAN 200 | `172.16.16.2`    |
+| Switch de acesso   | `172.16.99.2`    |
+
+## Filial RJ
+
+| Elemento         | Endereço         |
+| :--------------- | :--------------- |
+| Bloco agregado   | `172.19.0.0/22`  |
+| VLAN 10          | `172.19.0.0/23`  |
+| VLAN 20          | `172.19.2.0/23`  |
+| VLAN 99          | `172.19.99.0/24` |
+| VLAN 200         | `172.19.4.0/30`  |
+| Core VLAN 10     | `172.19.0.1`     |
+| Core VLAN 20     | `172.19.2.1`     |
+| Core VLAN 99     | `172.19.99.1`    |
+| Core VLAN 200    | `172.19.4.1`     |
+| Branch Router    | `172.19.4.2`     |
+| Switch de acesso | `172.19.99.2`    |
+
+## CPD
+
+| Elemento             | Endereço           |
+| :------------------- | :----------------- |
+| LAN CPD              | `172.16.32.0/22`   |
+| Gateway CPD          | `172.16.32.1`      |
+| Server-Financial-Hub | `172.16.32.10`     |
+| Loopback 0           | `192.168.100.1/32` |
+
+## WAN
+
+| Enlace | Sub-rede      | Ponta A              | Ponta B              |
+| :----- | :------------ | :------------------- | :------------------- |
+| WAN 1  | `10.0.0.0/30` | `10.0.0.1` — HQ DCE  | `10.0.0.2` — RJ DTE  |
+| WAN 2  | `10.0.0.4/30` | `10.0.0.5` — RJ DCE  | `10.0.0.6` — CPD DTE |
+| WAN 3  | `10.0.0.8/30` | `10.0.0.9` — CPD DCE | `10.0.0.10` — HQ DTE |
+
+---
+
+# ⏱️ 12. Clock Rate e Interfaces Seriais
+
+A malha serial utiliza o padrão definido no cenário com módulo `HWIC-2T` no Slot 3.
+
+As interfaces DCE possuem:
+
+```cisco
+clock rate 64000
+```
+
+### Distribuição
+
+| Equipamento          | Interface | Papel       | Clock   |
+| :------------------- | :-------- | :---------- | :------ |
+| `HQ-Edge-RTR`        | `Se0/3/0` | DCE — WAN 1 | `64000` |
+| `HQ-Edge-RTR`        | `Se0/3/1` | DTE — WAN 3 | —       |
+| `Branch-Edge-RTR`    | `Se0/3/0` | DCE — WAN 2 | `64000` |
+| `Branch-Edge-RTR`    | `Se0/3/1` | DTE — WAN 1 | —       |
+| `CPD-Datacenter-RTR` | `Se0/3/0` | DCE — WAN 3 | `64000` |
+| `CPD-Datacenter-RTR` | `Se0/3/1` | DTE — WAN 2 | —       |
+
+O objetivo da distribuição DCE/DTE é manter o sincronismo de clock da malha serial.
+
+---
+
+# 🧪 13. Sequência Recomendada de Execução
+
+A validação completa deve seguir a ordem abaixo:
+
+```text
+01 ── Verificar conectividade física e interfaces
+      │
+02 ── Validar OSPF
+      │
+03 ── Validar eBGP
+      │
+04 ── Validar redistribuição
+      │
+05 ── Validar DHCP
+      │
+06 ── Validar VLANs / trunks
+      │
+07 ── Executar teste ICMP nominal
+      │
+08 ── Executar teste de falha WAN
+      │
+09 ── Confirmar convergência pela WAN 2
+      │
+10 ── Validar hardening SSHv2
+      │
+11 ── Capturar evidências
+```
+
+---
+
+# 📸 14. Padrão de Evidências
+
+Cada teste deve produzir uma captura clara do console ou da área de configuração correspondente.
+
+| Arquivo                              | Evidência                                         |
+| :----------------------------------- | :------------------------------------------------ |
+| `ev-01-ospf-adjacency.png`           | Saída do `show ip ospf neighbor` mostrando `FULL` |
+| `ev-02-ebgp-peering-established.png` | Saída do `show ip bgp summary` no HQ/CPD          |
+| `ev-03-dhcp-core-pools.png`          | Estações recebendo leases DHCP corretamente       |
+| `ev-04-wan-failover-convergence.png` | ICMP contínuo + falha + recuperação pela WAN 2    |
+| `ev-05-hardening-sshv2.png`          | Evidência dos parâmetros de gerenciamento SSHv2   |
+
+As imagens devem ser armazenadas exclusivamente em:
+
+```text
+assets/evidences/
+```
+
+---
+
+# ✅ 15. Critérios Finais de Aceitação
+
+A infraestrutura é considerada validada quando os seguintes resultados forem observados:
+
+| Domínio              | Critério                                                              |
+| :------------------- | :-------------------------------------------------------------------- |
+| **OSPF**             | Adjacências operacionais em `FULL`                                    |
+| **eBGP**             | Sessão entre AS `65001` e AS `65002` estabelecida                     |
+| **BGP**              | Prefixos do CPD anunciados para a Matriz                              |
+| **Redistribuição**   | Rotas BGP disponíveis no domínio OSPF e redes OSPF anunciadas via BGP |
+| **DHCP SP**          | Hosts recebendo endereços a partir de `.51` em redes `/22`            |
+| **DHCP RJ**          | Hosts recebendo endereços a partir de `.51` em redes `/23`            |
+| **Gateway**          | Cada estação utilizando a SVI correspondente                          |
+| **DNS**              | `172.16.32.10`                                                        |
+| **VLANs**            | Segmentação conforme o plano de endereçamento                         |
+| **Trunks**           | Apenas VLANs homologadas transportadas                                |
+| **WAN**              | Três enlaces seriais operacionais no cenário nominal                  |
+| **Failover**         | Comunicação recuperada através da WAN 2                               |
+| **Rotas flutuantes** | AD `115` utilizada como contingência                                  |
+| **SSH**              | SSHv2 habilitado e Telnet não utilizado                               |
+| **Criptografia**     | RSA de `2048` bits                                                    |
+| **Autenticação**     | Login local com privilégio `15`                                       |
+| **Sessão**           | Timeout de `60` segundos                                              |
+| **Tentativas**       | Limite de `4` autenticações                                           |
+| **Gerência**         | VLAN `99` dedicada                                                    |
+
+---
+
+## 📁 16. Estrutura de Evidências no Repositório
+
+```text
+assets/
+└── evidences/
+    ├── ev-01-ospf-adjacency.png
+    ├── ev-02-ebgp-peering-established.png
+    ├── ev-03-dhcp-core-pools.png
+    ├── ev-04-wan-failover-convergence.png
+    └── ev-05-hardening-sshv2.png
+```
+
+Este diretório concentra as comprovações visuais da operação da infraestrutura, mantendo separadas as evidências de **roteamento**, **serviços**, **resiliência** e **segurança operacional**.
