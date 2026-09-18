@@ -183,18 +183,15 @@ O ambiente foi configurado para cumprir as diretrizes de segurança da informaç
 ### 1. Convergência da Malha de Roteamento OSPF e Peering BGP
 * Comando `show ip ospf neighbor` nos roteadores de borda confirmando adjacência em estado `FULL`.
 * Comando `show ip bgp summary` no `HQ-Edge-RTR` e `CPD-Datacenter-RTR` confirmando estado da sessão eBGP estabelecido com troca contínua de prefixos.
-![Evidência OSPF e BGP](assets/evidence-bgp-summary.png)
 
 ### 2. Validação da Entrega Dinâmica de Parâmetros de Rede (DHCP Core)
 * Disparo de solicitação DHCP a partir das estações de trabalho de cada VLAN.
 * Comprovação de recebimento de IP útil a partir do `.51`, máscara correta (/22 ou /23), gateway apontando para a respectiva SVI e servidor DNS apontando categoricamente para o CPD (`172.16.32.10`).
-![Evidência DHCP](assets/evidence-dhcp-lease.png)
 
 ### 3. Ensaio de Tolerância a Falhas WAN (Failover Test)
 1. **Cenário Nominal:** Disparo de tráfego ICMP contínuo de `PC-RJ-Ops-01` (`172.19.2.51`) para o `Server-Financial-Hub` (`172.16.32.10`). Pacotes transitam pelo caminho preferencial WAN 1 (OSPF) até a Matriz e alcançam o CPD pela WAN 3.
 2. **Injeção de Falha:** Desativação manual da interface serial `Se0/3/0` no `Branch-Edge-RTR` (`shutdown`).
 3. **Convergência:** Perda transitória de apenas 1 a 2 pacotes ICMP durante o tempo de expiração do Dead Interval do OSPF. A rota flutuante com AD 115 é instalada e o tráfego é reencaminhado pela WAN 2 sem perda de serviço.
-![Evidência de Failover](assets/evidence-failover-icmp.png)
 
 ---
 
@@ -214,6 +211,6 @@ O ambiente foi configurado para cumprir as diretrizes de segurança da informaç
 
 **Murilo Carlucci**  
 *Graduando em Cibersegurança | FIAP Campus Paulista*  
-* [LinkedIn](https://linkedin.com/in/[meu-usuario])  
-* [GitHub](https://github.com/[meu-usuario])  
+* [LinkedIn](https://linkedin.com/in/muricarlucci)  
+* [GitHub](https://github.com/muricarlucci)  
 * E-mail: muricarlucci@gmail.com
