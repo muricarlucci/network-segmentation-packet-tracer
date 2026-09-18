@@ -1,1086 +1,703 @@
-# 🏗️ Arquitetura e Plano de Endereçamento
+# Architecture and Addressing — ANBIMA Financial Hub
 
-> **PROJETO ANIBIA — Infraestrutura de Redes Corporativa Simulada**
->
-> Documentação da arquitetura física e lógica, segmentação de rede, plano IPv4, Supernetting, VLSM, VLANs, enlaces ponto a ponto e distribuição de endereçamento da infraestrutura simulada no Cisco Packet Tracer.
+[![Topology: Cisco Packet Tracer](https://img.shields.io/badge/Topology-Cisco%20Packet%20Tracer-orange)](#-2-topologia-da-infraestrutura)
+[![Addressing: IPv4 + VLSM](https://img.shields.io/badge/Addressing-IPv4%20%2B%20VLSM-blue)](#-5-plano-de-endere%C3%A7amento-ipv4)
+[![Segmentation: VLANs](https://img.shields.io/badge/Segmentation-VLANs-darkgreen)](#-4-segmenta%C3%A7%C3%A3o-l%C3%B3gica)
+[![WAN: Point-to-Point](https://img.shields.io/badge/WAN-Point--to--Point%20%2F30-red)](#-6-endere%C3%A7amento-da-malha-wan)
 
----
+Documentação da arquitetura física, lógica e do plano de endereçamento IPv4 da infraestrutura corporativa simulada da ANBIMA. O projeto é composto por três sítios estratégicos — **Matriz SP**, **Filial Regional RJ** e **CPD Regulatório/Datacenter de Contingência** — interconectados por enlaces WAN seriais ponto a ponto e estruturados internamente através de comutação multicamada, segmentação por VLANs e sub-redes hierarquizadas.
 
-## 📌 Visão Geral
-
-O **PROJETO ANIBIA** representa uma infraestrutura de rede corporativa distribuída em **três localidades estratégicas**:
-
-* 🏢 **Matriz SP (HQ)**
-* 🏢 **Filial Regional RJ (Branch)**
-* 🗄️ **CPD Regulatório / Datacenter**
-
-As localidades são interconectadas por uma **WAN em topologia de anel**, formada por três enlaces seriais ponto a ponto.
-
-Internamente, a arquitetura combina:
-
-* segmentação lógica por **VLANs**;
-* roteamento de Camada 3 nos switches Core;
-* enlaces **trunk 802.1Q** entre Core e Access;
-* sub-redes departamentais dimensionadas com **VLSM**;
-* blocos agregados por **Supernetting**;
-* enlaces ponto a ponto utilizando **/30**;
-* VLAN dedicada para gerenciamento;
-* VLAN dedicada ao trânsito L3 entre Core e roteador;
-* DHCP centralizado nos switches Core das localidades;
-* conectividade com o CPD através da malha WAN.
-
-A arquitetura foi construída para representar uma rede corporativa segmentada, distribuída e preparada para continuidade de comunicação entre os três sítios.
+Este documento concentra exclusivamente a **estrutura da infraestrutura e seu endereçamento**, servindo como referência para identificar onde cada ativo está localizado, qual função exerce e qual rede pertence a cada segmento.
 
 ---
 
-## 🗺️ Arquitetura Física
+## 🏛️ 1. Visão Arquitetural
 
-A infraestrutura possui sete dispositivos de rede gerenciáveis e um servidor central.
+A infraestrutura está organizada em três ambientes:
 
-### Distribuição dos equipamentos
+| Localidade    | Identificação          | Característica                                                 |
+| :------------ | :--------------------- | :------------------------------------------------------------- |
+| **Matriz SP** | Sede principal         | Core L3, Access L2, segmentação departamental e DHCP           |
+| **Filial RJ** | Unidade regional       | Core L3, Access L2, segmentação regional e DHCP                |
+| **CPD**       | Datacenter Regulatório | Servidores centrais, serviços corporativos e conectividade WAN |
 
-| Localidade         | Dispositivo            | Modelo             | Função principal           |
-| ------------------ | ---------------------- | ------------------ | -------------------------- |
-| 🇧🇷 **Matriz SP** | `HQ-Edge-RTR`          | Cisco 2911         | Roteador de borda / ASBR   |
-| 🇧🇷 **Matriz SP** | `HQ-Core-3650`         | Catalyst 3650-24PS | Core L3, SVIs, DHCP e OSPF |
-| 🇧🇷 **Matriz SP** | `HQ-Access-2960`       | Catalyst 2960-24TT | Acesso L2                  |
-| 🇧🇷 **Filial RJ** | `Branch-Edge-RTR`      | Cisco 2911         | Roteador de borda regional |
-| 🇧🇷 **Filial RJ** | `Branch-Core-3650`     | Catalyst 3650-24PS | Core L3, SVIs, DHCP e OSPF |
-| 🇧🇷 **Filial RJ** | `Branch-Access-2960`   | Catalyst 2960-24TT | Acesso L2                  |
-| 🗄️ **CPD**        | `CPD-Datacenter-RTR`   | Cisco 2911         | Roteador do Datacenter     |
-| 🗄️ **CPD**        | `Server-Financial-Hub` | Cisco Server PT    | Servidor central           |
+A arquitetura utiliza uma separação clara entre:
+
+```text
+Camada de Acesso
+        │
+        ▼
+Camada Core / L3
+        │
+        ▼
+Borda do Site
+        │
+        ▼
+Malha WAN
+        │
+        ▼
+Demais Sites
+```
+
+A comunicação interna de cada localidade é estruturada através de enlaces Ethernet e VLANs, enquanto a interconexão entre localidades utiliza enlaces seriais ponto a ponto.
 
 ---
 
-## 🧩 Organização Hierárquica
+# 🗺️ 2. Topologia da Infraestrutura
 
-A arquitetura local segue uma separação clara entre **borda, Core e acesso**.
+A topologia lógica implementada no projeto é composta pelos três sítios e seus respectivos ativos de infraestrutura.
 
 ```mermaid
-flowchart TB
+flowchart TD
 
-    subgraph WAN["🌐 WAN EM ANEL"]
-        HQWAN["HQ-Edge-RTR"]
-        BRWAN["Branch-Edge-RTR"]
-        CPDWAN["CPD-Datacenter-RTR"]
+    subgraph CPD ["CPD ANBIMA — Datacenter Regulatório"]
+        CPD_RTR["CPD-Datacenter-RTR<br/>Cisco 2911"]
+        CPD_SRV["Server-Financial-Hub<br/>172.16.32.10"]
+        CPD_LB["Loopback 0<br/>192.168.100.1/32"]
 
-        HQWAN ---|"WAN 1<br/>10.0.0.0/30"| BRWAN
-        BRWAN ---|"WAN 2<br/>10.0.0.4/30"| CPDWAN
-        CPDWAN ---|"WAN 3<br/>10.0.0.8/30"| HQWAN
+        CPD_RTR --- CPD_SRV
+        CPD_RTR --- CPD_LB
     end
 
-    subgraph HQ["🏢 MATRIZ SP"]
-        HQCORE["HQ-Core-3650<br/>L3 Core"]
+    subgraph MATRIZ ["Sede Matriz SP"]
+        HQ_RTR["HQ-Edge-RTR<br/>Cisco 2911"]
+        HQ_CORE["HQ-Core-3650<br/>Catalyst 3650-24PS"]
+        HQ_ACC["HQ-Access-2960<br/>Catalyst 2960-24TT"]
+        HQ_USERS["VLANs 10, 20, 30, 40<br/>SOC / Financeiro / Analytics / Auditoria"]
 
-        HQACCESS["HQ-Access-2960<br/>L2 Access"]
-
-        HQUSERS["8 estações<br/>VLANs 10, 20, 30, 40"]
-
-        HQWAN ---|"VLAN 200<br/>172.16.16.0/30"| HQCORE
-        HQCORE ---|"Trunk 802.1Q<br/>VLANs 10,20,30,40,99"| HQACCESS
-        HQACCESS --- HQUSERS
+        HQ_RTR -- "VLAN 200<br/>172.16.16.0/30" --- HQ_CORE
+        HQ_CORE -- "Trunk 802.1Q" --- HQ_ACC
+        HQ_ACC --- HQ_USERS
     end
 
-    subgraph RJ["🏢 FILIAL RJ"]
-        BRCORE["Branch-Core-3650<br/>L3 Core"]
+    subgraph FILIAL ["Filial Regional RJ"]
+        BR_RTR["Branch-Edge-RTR<br/>Cisco 2911"]
+        BR_CORE["Branch-Core-3650<br/>Catalyst 3650-24PS"]
+        BR_ACC["Branch-Access-2960<br/>Catalyst 2960-24TT"]
+        BR_USERS["VLANs 10, 20<br/>Supervisão / Operações"]
 
-        BRACCESS["Branch-Access-2960<br/>L2 Access"]
-
-        BRUSERS["4 estações<br/>VLANs 10 e 20"]
-
-        BRWAN ---|"VLAN 200<br/>172.19.4.0/30"| BRCORE
-        BRCORE ---|"Trunk 802.1Q<br/>VLANs 10,20,99"| BRACCESS
-        BRACCESS --- BRUSERS
+        BR_RTR -- "VLAN 200<br/>172.19.4.0/30" --- BR_CORE
+        BR_CORE -- "Trunk 802.1Q" --- BR_ACC
+        BR_ACC --- BR_USERS
     end
 
-    subgraph CPD["🗄️ CPD REGULATÓRIO"]
-        SERVER["Server-Financial-Hub<br/>172.16.32.10"]
-        LOOP["Loopback 0<br/>192.168.100.1/32"]
+    HQ_RTR -- "WAN 1<br/>10.0.0.0/30" --- BR_RTR
+    BR_RTR -- "WAN 2<br/>10.0.0.4/30" --- CPD_RTR
+    CPD_RTR -- "WAN 3<br/>10.0.0.8/30" --- HQ_RTR
+```
 
-        CPDWAN --- SERVER
-        CPDWAN --- LOOP
-    end
+### Representação física
+
+A implementação física da topologia foi realizada no **Cisco Packet Tracer**, utilizando os equipamentos definidos no cenário.
+
+```text
+                         ┌──────────────────────┐
+                         │        CPD           │
+                         │ Datacenter Regulatório│
+                         │                      │
+                         │ CPD-Datacenter-RTR   │
+                         │ Server-Financial-Hub  │
+                         └──────────┬───────────┘
+                                    │
+                         WAN 2 / WAN 3
+                                    │
+               ┌────────────────────┴────────────────────┐
+               │                                         │
+        ┌──────▼───────┐                         ┌──────▼───────┐
+        │  MATRIZ SP   │                         │  FILIAL RJ   │
+        │              │                         │              │
+        │ HQ-Edge-RTR  │─────── WAN 1 ─────────│Branch-Edge-RTR│
+        └──────┬───────┘                         └──────┬───────┘
+               │                                        │
+           VLAN 200                                  VLAN 200
+               │                                        │
+        ┌──────▼───────┐                         ┌──────▼───────┐
+        │HQ-Core-3650  │                         │Branch-Core   │
+        │     L3       │                         │     L3       │
+        └──────┬───────┘                         └──────┬───────┘
+               │                                        │
+             Trunk                                    Trunk
+               │                                        │
+        ┌──────▼───────┐                         ┌──────▼───────┐
+        │HQ-Access-2960│                         │Branch-Access │
+        │     L2       │                         │     L2       │
+        └──────────────┘                         └──────────────┘
+```
+
+![Topologia Física Implementada no Cisco Packet Tracer](assets/topology-packet-tracer.png)
+
+---
+
+# ⚙️ 3. Especificação dos Ativos
+
+A infraestrutura utiliza os seguintes ativos de rede e servidores.
+
+| Localidade     | Dispositivo            | Modelo                   | Papel na Arquitetura                                                 |
+| :------------- | :--------------------- | :----------------------- | :------------------------------------------------------------------- |
+| **Matriz SP**  | `HQ-Edge-RTR`          | Cisco 2911               | Roteador de borda da Matriz                                          |
+| **Matriz SP**  | `HQ-Core-3650`         | Cisco Catalyst 3650-24PS | Core L3 da Matriz                                                    |
+| **Matriz SP**  | `HQ-Access-2960`       | Cisco Catalyst 2960-24TT | Acesso L2 da Matriz                                                  |
+| **Filial RJ**  | `Branch-Edge-RTR`      | Cisco 2911               | Roteador de borda regional                                           |
+| **Filial RJ**  | `Branch-Core-3650`     | Cisco Catalyst 3650-24PS | Core L3 regional                                                     |
+| **Filial RJ**  | `Branch-Access-2960`   | Cisco Catalyst 2960-24TT | Acesso L2 regional                                                   |
+| **Datacenter** | `CPD-Datacenter-RTR`   | Cisco 2911               | Roteador de borda do CPD                                             |
+| **Datacenter** | `Server-Financial-Hub` | Cisco Server PT          | Servidor de liquidação, banco de dados regulatório e DNS corporativo |
+
+### Distribuição funcional
+
+```text
+MATRIZ SP
+├── HQ-Edge-RTR
+│   └── Borda / WAN
+├── HQ-Core-3650
+│   └── Core L3 / SVIs / DHCP
+└── HQ-Access-2960
+    └── Acesso L2 / VLANs
+
+FILIAL RJ
+├── Branch-Edge-RTR
+│   └── Borda / WAN
+├── Branch-Core-3650
+│   └── Core L3 / SVIs / DHCP
+└── Branch-Access-2960
+    └── Acesso L2 / VLANs
+
+CPD
+├── CPD-Datacenter-RTR
+│   └── Borda / WAN / LAN CPD
+└── Server-Financial-Hub
+    └── Serviços centrais
 ```
 
 ---
 
-# 🏢 1. Matriz SP — HQ
+# 🧩 4. Segmentação Lógica
 
-A Matriz concentra a maior quantidade de segmentos corporativos da infraestrutura.
+A segmentação interna da infraestrutura é realizada através de VLANs.
 
-Sua arquitetura é formada por:
+A **Matriz SP** possui quatro VLANs departamentais, uma VLAN dedicada ao gerenciamento Out-of-Band e uma VLAN específica para trânsito L3.
+
+A **Filial RJ** possui duas VLANs departamentais, uma VLAN de gerenciamento e uma VLAN específica para trânsito L3.
+
+## 4.1 Matriz SP
+
+| VLAN  | Segmento Corporativo               | Sub-rede         | Máscara           | Gateway SVI   |
+| :---- | :--------------------------------- | :--------------- | :---------------- | :------------ |
+| `10`  | Segurança Operacional (SOC/NOC)    | `172.16.0.0/22`  | `255.255.252.0`   | `172.16.0.1`  |
+| `20`  | Núcleo Financeiro e Liquidação     | `172.16.4.0/22`  | `255.255.252.0`   | `172.16.4.1`  |
+| `30`  | Dados de Mercado e Analytics       | `172.16.8.0/22`  | `255.255.252.0`   | `172.16.8.1`  |
+| `40`  | Auditoria e Compliance Normativo   | `172.16.12.0/22` | `255.255.252.0`   | `172.16.12.1` |
+| `99`  | Gerência Out-of-Band (Switches)    | `172.16.99.0/24` | `255.255.255.0`   | `172.16.99.1` |
+| `200` | Enlace Trânsito L3 (Core ↔ Router) | `172.16.16.0/30` | `255.255.255.252` | `172.16.16.1` |
+
+### Uplink da Matriz
 
 ```text
-HQ-Edge-RTR
-     │
-     │ VLAN 200 / Trânsito L3
-     │ 172.16.16.0/30
-     │
 HQ-Core-3650
-     │
-     │ Trunk 802.1Q
-     │ VLANs 10,20,30,40,99
-     │
+Gig1/0/1
+      │
+      │ Trunk 802.1Q
+      │ VLANs 10,20,30,40,99
+      ▼
 HQ-Access-2960
-     │
-     ├── VLAN 10 → Segurança Operacional
-     ├── VLAN 20 → Núcleo Financeiro
-     ├── VLAN 30 → Dados de Mercado / Analytics
-     └── VLAN 40 → Auditoria / Compliance
+Gig0/1
 ```
 
-### Equipamentos da Matriz
-
-#### `HQ-Edge-RTR`
-
-**Modelo:** Cisco 2911
-
-Responsabilidades arquiteturais:
-
-* roteamento de borda;
-* terminação dos enlaces WAN 1 e WAN 3;
-* participação no OSPF;
-* integração entre OSPF e BGP;
-* comunicação com o CPD através da WAN 3.
-
-#### `HQ-Core-3650`
-
-**Modelo:** Cisco Catalyst 3650-24PS
-
-Responsabilidades:
-
-* roteamento L3;
-* criação das SVIs;
-* gateway das VLANs corporativas;
-* DHCP das VLANs da Matriz;
-* conexão L3 com o roteador de borda;
-* participação no OSPF.
-
-#### `HQ-Access-2960`
-
-**Modelo:** Cisco Catalyst 2960-24TT
-
-Responsabilidades:
-
-* comutação de Camada 2;
-* conexão das estações;
-* associação das portas às VLANs;
-* uplink trunk para o Core;
-* gerenciamento através da VLAN 99.
+A VLAN `200` é utilizada especificamente no enlace de trânsito L3 entre o Core e o roteador.
 
 ---
 
-# 🏢 2. Filial Regional RJ
+## 4.2 Filial Regional RJ
 
-A Filial RJ possui uma estrutura semelhante à Matriz, porém com menor quantidade de segmentos.
+| VLAN  | Segmento Corporativo                  | Sub-rede         | Máscara           | Gateway SVI   |
+| :---- | :------------------------------------ | :--------------- | :---------------- | :------------ |
+| `10`  | Supervisão Regional e Fiscalização    | `172.19.0.0/23`  | `255.255.254.0`   | `172.19.0.1`  |
+| `20`  | Operações Regionais e Negócios        | `172.19.2.0/23`  | `255.255.254.0`   | `172.19.2.1`  |
+| `99`  | Gerência Out-of-Band (Switches RJ)    | `172.19.99.0/24` | `255.255.255.0`   | `172.19.99.1` |
+| `200` | Enlace Trânsito L3 (Core RJ ↔ Router) | `172.19.4.0/30`  | `255.255.255.252` | `172.19.4.1`  |
+
+### Uplink da Filial
 
 ```text
-Branch-Edge-RTR
-       │
-       │ VLAN 200 / Trânsito L3
-       │ 172.19.4.0/30
-       │
 Branch-Core-3650
-       │
-       │ Trunk 802.1Q
-       │ VLANs 10,20,99
-       │
+Gig1/0/1
+      │
+      │ Trunk 802.1Q
+      │ VLANs 10,20,99
+      ▼
 Branch-Access-2960
-       │
-       ├── VLAN 10 → Supervisão Regional
-       └── VLAN 20 → Operações Regionais
+Gig0/1
 ```
 
-### Equipamentos da Filial
-
-#### `Branch-Edge-RTR`
-
-**Modelo:** Cisco 2911
-
-Responsabilidades:
-
-* conexão da filial à WAN;
-* terminação da WAN 1;
-* terminação da WAN 2;
-* conexão L3 com o Core RJ;
-* utilização de rotas estáticas de contingência.
-
-#### `Branch-Core-3650`
-
-**Modelo:** Cisco Catalyst 3650-24PS
-
-Responsabilidades:
-
-* roteamento L3;
-* SVIs das VLANs regionais;
-* DHCP;
-* participação no OSPF;
-* rota padrão para o roteador de borda.
-
-#### `Branch-Access-2960`
-
-**Modelo:** Cisco Catalyst 2960-24TT
-
-Responsabilidades:
-
-* comutação L2;
-* conexão das estações regionais;
-* segmentação por VLAN;
-* trunk para o Core;
-* gerenciamento pela VLAN 99.
+A VLAN `200` é utilizada especificamente no enlace de trânsito L3 entre o Core RJ e o roteador regional.
 
 ---
 
-# 🗄️ 3. CPD Regulatório
+# 📐 5. Plano de Endereçamento IPv4
 
-O CPD representa o Datacenter Regulatório da infraestrutura.
+O plano de endereçamento utiliza blocos privados definidos no espaço RFC 1918 e emprega diferentes tamanhos de prefixo conforme a função de cada segmento.
 
-O ambiente possui:
+A arquitetura utiliza:
 
 ```text
-                    ┌──────────────────────────┐
-                    │ CPD-Datacenter-RTR       │
-                    │ Cisco 2911               │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────┴─────────────┐
-                    │                          │
-             LAN CPD /22                 Loopback 0
-             172.16.32.0/22             192.168.100.1/32
-                    │
-                    │
-          Server-Financial-Hub
-             172.16.32.10
+/20  → bloco agregado da Matriz
+/22  → segmentos departamentais da Matriz
+/23  → segmentos departamentais da Filial
+/24  → gerenciamento
+/30  → enlaces ponto a ponto
+/32  → Loopback
 ```
-
-### `CPD-Datacenter-RTR`
-
-**Modelo:** Cisco 2911
-
-O roteador:
-
-* termina a WAN 2;
-* termina a WAN 3;
-* participa da conectividade com a Matriz;
-* participa da conectividade com a Filial;
-* realiza o peering externo com a Matriz;
-* conecta a LAN dos servidores.
-
-### `Server-Financial-Hub`
-
-**Endereço:** `172.16.32.10`
-
-O servidor hospeda os serviços centrais descritos no cenário, incluindo:
-
-* serviços de liquidação;
-* banco de dados regulatório;
-* índices de mercado;
-* serviço DNS corporativo utilizado pelos escopos DHCP.
 
 ---
 
-# 📐 4. Estratégia de Endereçamento IPv4
+## 5.1 Bloco Agregado — Matriz SP
 
-O plano de endereçamento utiliza principalmente blocos privados da RFC 1918.
-
-Os principais blocos utilizados são:
-
-| Finalidade      | Bloco              |
-| --------------- | ------------------ |
-| Matriz SP       | `172.16.0.0/20`    |
-| Filial RJ       | `172.19.0.0/22`    |
-| LAN do CPD      | `172.16.32.0/22`   |
-| Loopback do CPD | `192.168.100.1/32` |
-| WAN 1           | `10.0.0.0/30`      |
-| WAN 2           | `10.0.0.4/30`      |
-| WAN 3           | `10.0.0.8/30`      |
-
-A arquitetura combina:
-
-* **Supernetting** para organização dos blocos maiores;
-* **Subnetting** para divisão em segmentos;
-* **VLSM** para utilização de diferentes tamanhos de prefixos;
-* **/30** para enlaces ponto a ponto;
-* **/32** para a Loopback do CPD.
-
----
-
-# 🧮 5. Supernet da Matriz — `172.16.0.0/20`
-
-O bloco da Matriz é:
-
-```text
-Rede:       172.16.0.0/20
-Máscara:    255.255.240.0
-Primeiro:   172.16.0.0
-Último:     172.16.15.255
-```
-
-O bloco possui **4.096 endereços IPv4**.
-
-Ele foi subdividido em quatro redes `/22`.
+O bloco:
 
 ```text
 172.16.0.0/20
-│
-├── 172.16.0.0/22   → VLAN 10
-├── 172.16.4.0/22   → VLAN 20
-├── 172.16.8.0/22   → VLAN 30
-└── 172.16.12.0/22  → VLAN 40
 ```
 
-Além desses segmentos corporativos, existem redes específicas para:
+possui:
 
-* gerenciamento;
-* trânsito L3;
-* infraestrutura.
+```text
+Máscara:
+255.255.240.0
 
----
+Endereço inicial:
+172.16.0.0
 
-# 🧱 6. VLANs da Matriz
+Endereço final:
+172.16.15.255
 
-## VLAN 10 — Segurança Operacional
+Total:
+4096 endereços
+```
 
-| Parâmetro | Valor                           |
-| --------- | ------------------------------- |
-| VLAN      | `10`                            |
-| Segmento  | Segurança Operacional (SOC/NOC) |
-| Rede      | `172.16.0.0/22`                 |
-| Máscara   | `255.255.252.0`                 |
-| Gateway   | `172.16.0.1`                    |
-| Pool DHCP | `172.16.0.51` → `172.16.3.254`  |
-| Broadcast | `172.16.3.255`                  |
+O bloco foi dividido em sub-redes departamentais `/22`, utilizando salto de 4 em 4 no terceiro octeto.
 
-A VLAN 10 representa o segmento de **Segurança Operacional / SOC-NOC**.
+Cada `/22` fornece:
 
----
+```text
+1024 endereços totais
+1022 hosts úteis
+```
 
-## VLAN 20 — Núcleo Financeiro
+### Distribuição
 
-| Parâmetro | Valor                          |
-| --------- | ------------------------------ |
-| VLAN      | `20`                           |
-| Segmento  | Núcleo Financeiro e Liquidação |
-| Rede      | `172.16.4.0/22`                |
-| Máscara   | `255.255.252.0`                |
-| Gateway   | `172.16.4.1`                   |
-| Pool DHCP | `172.16.4.51` → `172.16.7.254` |
-| Broadcast | `172.16.7.255`                 |
+| VLAN | Rede             | Faixa de hosts                     | Broadcast       |
+| :--- | :--------------- | :--------------------------------- | :-------------- |
+| `10` | `172.16.0.0/22`  | `172.16.0.51` até `172.16.3.254`   | `172.16.3.255`  |
+| `20` | `172.16.4.0/22`  | `172.16.4.51` até `172.16.7.254`   | `172.16.7.255`  |
+| `30` | `172.16.8.0/22`  | `172.16.8.51` até `172.16.11.254`  | `172.16.11.255` |
+| `40` | `172.16.12.0/22` | `172.16.12.51` até `172.16.15.254` | `172.16.15.255` |
 
-A VLAN 20 representa o segmento de **Núcleo Financeiro e Liquidação**.
+Os primeiros 50 endereços úteis de cada sub-rede são reservados, fazendo com que a distribuição DHCP seja iniciada em `.51`.
 
 ---
 
-## VLAN 30 — Dados de Mercado e Analytics
+## 5.2 Gerenciamento — Matriz SP
 
-| Parâmetro | Valor                           |
-| --------- | ------------------------------- |
-| VLAN      | `30`                            |
-| Segmento  | Dados de Mercado e Analytics    |
-| Rede      | `172.16.8.0/22`                 |
-| Máscara   | `255.255.252.0`                 |
-| Gateway   | `172.16.8.1`                    |
-| Pool DHCP | `172.16.8.51` → `172.16.11.254` |
-| Broadcast | `172.16.11.255`                 |
+```text
+VLAN 99
+172.16.99.0/24
+```
 
-A VLAN 30 representa o segmento de **Dados de Mercado e Analytics**.
-
----
-
-## VLAN 40 — Auditoria e Compliance
-
-| Parâmetro | Valor                            |
-| --------- | -------------------------------- |
-| VLAN      | `40`                             |
-| Segmento  | Auditoria e Compliance Normativo |
-| Rede      | `172.16.12.0/22`                 |
-| Máscara   | `255.255.252.0`                  |
-| Gateway   | `172.16.12.1`                    |
-| Pool DHCP | `172.16.12.51` → `172.16.15.254` |
-| Broadcast | `172.16.15.255`                  |
-
-A VLAN 40 representa o segmento de **Auditoria e Compliance Normativo**.
+| Elemento       | Endereço        |
+| :------------- | :-------------- |
+| Rede           | `172.16.99.0`   |
+| Máscara        | `255.255.255.0` |
+| Gateway        | `172.16.99.1`   |
+| HQ-Access-2960 | `172.16.99.2`   |
+| Broadcast      | `172.16.99.255` |
 
 ---
 
-# 🔐 7. VLAN 99 — Gerência Out-of-Band
+## 5.3 Trânsito L3 — Matriz SP
 
-A VLAN 99 é utilizada para gerenciamento dos switches de acesso.
+```text
+VLAN 200
+172.16.16.0/30
+```
 
-### Matriz
-
-| Parâmetro              | Valor                |
-| ---------------------- | -------------------- |
-| VLAN                   | `99`                 |
-| Finalidade             | Gerência Out-of-Band |
-| Rede                   | `172.16.99.0/24`     |
-| Máscara                | `255.255.255.0`      |
-| Gateway                | `172.16.99.1`        |
-| IP do switch de acesso | `172.16.99.2`        |
-| Broadcast              | `172.16.99.255`      |
-
-O endereço `172.16.99.2` é utilizado como IP fixo do `HQ-Access-2960`.
-
-A VLAN 99 é transportada pelo trunk entre Core e Access.
+| Elemento           | Endereço          |
+| :----------------- | :---------------- |
+| Rede               | `172.16.16.0`     |
+| Máscara            | `255.255.255.252` |
+| Core               | `172.16.16.1`     |
+| Roteador           | `172.16.16.2`     |
+| Endereço adicional | `172.16.16.3`     |
+| Broadcast          | `172.16.16.3`     |
 
 ---
 
-# 🔗 8. VLAN 200 — Trânsito L3 da Matriz
-
-A VLAN 200 é utilizada exclusivamente como rede de trânsito entre o Core e o roteador de borda.
-
-| Parâmetro    | Valor                     |
-| ------------ | ------------------------- |
-| VLAN         | `200`                     |
-| Finalidade   | Trânsito L3 Core ↔ Router |
-| Rede         | `172.16.16.0/30`          |
-| Máscara      | `255.255.255.252`         |
-| HQ-Core-3650 | `172.16.16.1`             |
-| HQ-Edge-RTR  | `172.16.16.2`             |
-| Broadcast    | `172.16.16.3`             |
-
-Essa rede não representa um segmento destinado às estações de trabalho.
-
----
-
-# 🧮 9. Supernet da Filial RJ — `172.19.0.0/22`
+# 🏢 6. Endereçamento da Filial Regional RJ
 
 O bloco regional utilizado pela Filial é:
 
 ```text
-Rede:       172.19.0.0/22
-Máscara:    255.255.252.0
-Primeiro:   172.19.0.0
-Último:     172.19.3.255
-```
-
-O bloco possui **1.024 endereços IPv4**.
-
-Sua divisão principal é:
-
-```text
 172.19.0.0/22
-│
-├── 172.19.0.0/23 → VLAN 10
-└── 172.19.2.0/23 → VLAN 20
 ```
 
----
-
-# 🧱 10. VLANs da Filial RJ
-
-## VLAN 10 — Supervisão Regional
-
-| Parâmetro | Valor                              |
-| --------- | ---------------------------------- |
-| VLAN      | `10`                               |
-| Segmento  | Supervisão Regional e Fiscalização |
-| Rede      | `172.19.0.0/23`                    |
-| Máscara   | `255.255.254.0`                    |
-| Gateway   | `172.19.0.1`                       |
-| Pool DHCP | `172.19.0.51` → `172.19.1.254`     |
-| Broadcast | `172.19.1.255`                     |
-
----
-
-## VLAN 20 — Operações Regionais
-
-| Parâmetro | Valor                          |
-| --------- | ------------------------------ |
-| VLAN      | `20`                           |
-| Segmento  | Operações Regionais e Negócios |
-| Rede      | `172.19.2.0/23`                |
-| Máscara   | `255.255.254.0`                |
-| Gateway   | `172.19.2.1`                   |
-| Pool DHCP | `172.19.2.51` → `172.19.3.254` |
-| Broadcast | `172.19.3.255`                 |
-
----
-
-# 🔐 11. VLAN 99 — Gerência da Filial
-
-| Parâmetro              | Valor                |
-| ---------------------- | -------------------- |
-| VLAN                   | `99`                 |
-| Finalidade             | Gerência Out-of-Band |
-| Rede                   | `172.19.99.0/24`     |
-| Máscara                | `255.255.255.0`      |
-| Gateway                | `172.19.99.1`        |
-| IP do switch de acesso | `172.19.99.2`        |
-| Broadcast              | `172.19.99.255`      |
-
-O `Branch-Access-2960` utiliza o endereço:
+com:
 
 ```text
-172.19.99.2/24
+Máscara:
+255.255.252.0
+
+Endereço inicial:
+172.19.0.0
+
+Endereço final:
+172.19.3.255
+
+Total:
+1024 endereços
 ```
 
-com gateway:
+O bloco foi dividido em sub-redes `/23`, utilizando salto de 2 em 2 no terceiro octeto.
+
+Cada `/23` fornece:
 
 ```text
-172.19.99.1
+512 endereços totais
+510 hosts úteis
 ```
 
----
+### Distribuição
 
-# 🔗 12. VLAN 200 — Trânsito L3 da Filial
-
-| Parâmetro        | Valor                     |
-| ---------------- | ------------------------- |
-| VLAN             | `200`                     |
-| Finalidade       | Trânsito L3 Core ↔ Router |
-| Rede             | `172.19.4.0/30`           |
-| Máscara          | `255.255.255.252`         |
-| Branch-Core-3650 | `172.19.4.1`              |
-| Branch-Edge-RTR  | `172.19.4.2`              |
-| Broadcast        | `172.19.4.3`              |
-
-Assim como na Matriz, a VLAN 200 representa uma rede de trânsito entre os equipamentos L3.
+| VLAN | Rede            | Faixa de hosts                   | Broadcast      |
+| :--- | :-------------- | :------------------------------- | :------------- |
+| `10` | `172.19.0.0/23` | `172.19.0.51` até `172.19.1.254` | `172.19.1.255` |
+| `20` | `172.19.2.0/23` | `172.19.2.51` até `172.19.3.254` | `172.19.3.255` |
 
 ---
 
-# 🗄️ 13. Rede do CPD
+## 6.1 Gerenciamento — Filial RJ
 
-A LAN do Datacenter utiliza o bloco:
+```text
+VLAN 99
+172.19.99.0/24
+```
+
+| Elemento           | Endereço        |
+| :----------------- | :-------------- |
+| Rede               | `172.19.99.0`   |
+| Máscara            | `255.255.255.0` |
+| Gateway            | `172.19.99.1`   |
+| Branch-Access-2960 | `172.19.99.2`   |
+| Broadcast          | `172.19.99.255` |
+
+---
+
+## 6.2 Trânsito L3 — Filial RJ
+
+```text
+VLAN 200
+172.19.4.0/30
+```
+
+| Elemento  | Endereço          |
+| :-------- | :---------------- |
+| Rede      | `172.19.4.0`      |
+| Máscara   | `255.255.255.252` |
+| Core      | `172.19.4.1`      |
+| Roteador  | `172.19.4.2`      |
+| Broadcast | `172.19.4.3`      |
+
+---
+
+# 🗄️ 7. Endereçamento do CPD Regulatório
+
+O Datacenter possui uma rede dedicada para os servidores centrais.
 
 ```text
 172.16.32.0/22
 ```
 
-### Endereçamento
+A rede foi dimensionada acima da necessidade atual de um único servidor para comportar expansão futura de servidores redundantes no Datacenter de Contingência.
 
-| Dispositivo / Função | Endereço        |
-| -------------------- | --------------- |
-| Gateway do CPD       | `172.16.32.1`   |
-| Server-Financial-Hub | `172.16.32.10`  |
-| Máscara              | `255.255.252.0` |
-| Prefixo              | `/22`           |
+| Elemento             | Endereço         |
+| :------------------- | :--------------- |
+| Rede CPD             | `172.16.32.0/22` |
+| Máscara              | `255.255.252.0`  |
+| Gateway              | `172.16.32.1`    |
+| Server-Financial-Hub | `172.16.32.10`   |
 
-O servidor central utiliza:
+### Server-Financial-Hub
+
+O servidor central possui o endereço:
 
 ```text
-IP:       172.16.32.10
-Gateway:  172.16.32.1
+172.16.32.10
 ```
 
-O bloco `/22` foi dimensionado acima da necessidade atual do laboratório, permitindo comportar expansão futura de servidores no Datacenter.
+e representa o servidor de:
+
+* liquidação;
+* banco de dados regulatório;
+* DNS corporativo.
 
 ---
 
-# 🔄 14. Loopback do CPD
+## 7.1 Loopback 0
 
-O roteador do CPD possui uma interface lógica:
+O roteador do CPD possui a Loopback 0:
 
 ```text
-Loopback 0
 192.168.100.1/32
 ```
 
-| Parâmetro  | Valor                                   |
-| ---------- | --------------------------------------- |
+| Elemento   | Endereço                                |
+| :--------- | :-------------------------------------- |
 | Interface  | `Loopback 0`                            |
-| Endereço   | `192.168.100.1`                         |
 | Prefixo    | `/32`                                   |
-| Máscara    | `255.255.255.255`                       |
-| Finalidade | Teste de peering e serviço ininterrupto |
-
-Por ser uma interface lógica, a Loopback não depende de um enlace físico específico para permanecer configurada.
+| Endereço   | `192.168.100.1`                         |
+| Finalidade | Teste de Peering e Serviço Ininterrupto |
 
 ---
 
-# 🌐 15. WAN em Anel
+# 🌐 8. Endereçamento da Malha WAN
 
-A interconexão entre as três localidades utiliza três enlaces seriais ponto a ponto.
+Os enlaces entre os três sítios utilizam sub-redes `/30`, adequadas aos enlaces ponto a ponto definidos na arquitetura.
 
-```mermaid
-flowchart LR
-
-    HQ["🇧🇷 MATRIZ SP<br/>HQ-Edge-RTR"]
-    RJ["🇧🇷 FILIAL RJ<br/>Branch-Edge-RTR"]
-    CPD["🗄️ CPD<br/>CPD-Datacenter-RTR"]
-
-    HQ -->|"WAN 1<br/>10.0.0.0/30"| RJ
-    RJ -->|"WAN 2<br/>10.0.0.4/30"| CPD
-    CPD -->|"WAN 3<br/>10.0.0.8/30"| HQ
-```
-
-A topologia resultante é:
+Cada `/30` possui:
 
 ```text
-                 WAN 3
-        ┌────────────────────┐
-        │                    │
-        ▼                    │
-      CPD ─────── WAN 2 ─── RJ
-        ▲                    │
-        │                    │
-        └────── WAN 1 ───────┘
-                HQ
+4 endereços totais
+2 endereços utilizáveis
+```
+
+A malha é composta por três enlaces.
+
+---
+
+## 8.1 WAN 1 — Matriz SP ↔ Filial RJ
+
+```text
+10.0.0.0/30
+255.255.255.252
+```
+
+| Ponta | Equipamento       | Interface | Endereço   | Papel |
+| :---- | :---------------- | :-------- | :--------- | :---- |
+| A     | `HQ-Edge-RTR`     | `Se0/3/0` | `10.0.0.1` | DCE   |
+| B     | `Branch-Edge-RTR` | `Se0/3/1` | `10.0.0.2` | DTE   |
+
+```text
+10.0.0.0  → Rede
+10.0.0.1  → HQ
+10.0.0.2  → RJ
+10.0.0.3  → Broadcast
 ```
 
 ---
 
-# 🔌 16. WAN 1 — Matriz ↔ Filial RJ
-
-| Parâmetro    | Valor             |
-| ------------ | ----------------- |
-| Rede         | `10.0.0.0/30`     |
-| Máscara      | `255.255.255.252` |
-| Matriz SP    | `10.0.0.1`        |
-| Interface HQ | `Se0/3/0`         |
-| Tipo HQ      | DCE               |
-| Filial RJ    | `10.0.0.2`        |
-| Interface RJ | `Se0/3/1`         |
-| Tipo RJ      | DTE               |
-
-O lado DCE da Matriz utiliza:
+## 8.2 WAN 2 — Filial RJ ↔ CPD
 
 ```text
+10.0.0.4/30
+255.255.255.252
+```
+
+| Ponta | Equipamento          | Interface | Endereço   | Papel |
+| :---- | :------------------- | :-------- | :--------- | :---- |
+| A     | `Branch-Edge-RTR`    | `Se0/3/0` | `10.0.0.5` | DCE   |
+| B     | `CPD-Datacenter-RTR` | `Se0/3/1` | `10.0.0.6` | DTE   |
+
+```text
+10.0.0.4  → Rede
+10.0.0.5  → RJ
+10.0.0.6  → CPD
+10.0.0.7  → Broadcast
+```
+
+---
+
+## 8.3 WAN 3 — CPD ↔ Matriz SP
+
+```text
+10.0.0.8/30
+255.255.255.252
+```
+
+| Ponta | Equipamento          | Interface | Endereço    | Papel |
+| :---- | :------------------- | :-------- | :---------- | :---- |
+| A     | `CPD-Datacenter-RTR` | `Se0/3/0` | `10.0.0.9`  | DCE   |
+| B     | `HQ-Edge-RTR`        | `Se0/3/1` | `10.0.0.10` | DTE   |
+
+```text
+10.0.0.8  → Rede
+10.0.0.9  → CPD
+10.0.0.10 → HQ
+10.0.0.11 → Broadcast
+```
+
+---
+
+# 🔌 9. Interfaces Seriais e Distribuição DCE/DTE
+
+Os roteadores utilizam módulo `HWIC-2T` no **Slot 3** para os enlaces seriais.
+
+A distribuição física das interfaces é:
+
+| Equipamento          | Interface | Enlace | Papel |
+| :------------------- | :-------- | :----- | :---- |
+| `HQ-Edge-RTR`        | `Se0/3/0` | WAN 1  | DCE   |
+| `HQ-Edge-RTR`        | `Se0/3/1` | WAN 3  | DTE   |
+| `Branch-Edge-RTR`    | `Se0/3/0` | WAN 2  | DCE   |
+| `Branch-Edge-RTR`    | `Se0/3/1` | WAN 1  | DTE   |
+| `CPD-Datacenter-RTR` | `Se0/3/0` | WAN 3  | DCE   |
+| `CPD-Datacenter-RTR` | `Se0/3/1` | WAN 2  | DTE   |
+
+As interfaces DCE utilizam:
+
+```cisco
 clock rate 64000
 ```
 
 ---
 
-# 🔌 17. WAN 2 — Filial RJ ↔ CPD
+# 📊 10. Tabela Geral de Endereçamento
 
-| Parâmetro     | Valor             |
-| ------------- | ----------------- |
-| Rede          | `10.0.0.4/30`     |
-| Máscara       | `255.255.255.252` |
-| Filial RJ     | `10.0.0.5`        |
-| Interface RJ  | `Se0/3/0`         |
-| Tipo RJ       | DCE               |
-| CPD           | `10.0.0.6`        |
-| Interface CPD | `Se0/3/1`         |
-| Tipo CPD      | DTE               |
-
-O lado DCE da Filial utiliza:
-
-```text
-clock rate 64000
-```
-
-Esse enlace também representa o caminho utilizado na contingência WAN da Filial.
-
----
-
-# 🔌 18. WAN 3 — CPD ↔ Matriz
-
-| Parâmetro     | Valor             |
-| ------------- | ----------------- |
-| Rede          | `10.0.0.8/30`     |
-| Máscara       | `255.255.255.252` |
-| CPD           | `10.0.0.9`        |
-| Interface CPD | `Se0/3/0`         |
-| Tipo CPD      | DCE               |
-| Matriz SP     | `10.0.0.10`       |
-| Interface HQ  | `Se0/3/1`         |
-| Tipo HQ       | DTE               |
-
-O lado DCE do CPD utiliza:
-
-```text
-clock rate 64000
-```
+| Local  | Segmento   | Prefixo            | Gateway / Ponta | Endereço associado |
+| :----- | :--------- | :----------------- | :-------------- | :----------------- |
+| Matriz | VLAN 10    | `172.16.0.0/22`    | `172.16.0.1`    | Core SP            |
+| Matriz | VLAN 20    | `172.16.4.0/22`    | `172.16.4.1`    | Core SP            |
+| Matriz | VLAN 30    | `172.16.8.0/22`    | `172.16.8.1`    | Core SP            |
+| Matriz | VLAN 40    | `172.16.12.0/22`   | `172.16.12.1`   | Core SP            |
+| Matriz | VLAN 99    | `172.16.99.0/24`   | `172.16.99.1`   | Gerência           |
+| Matriz | VLAN 200   | `172.16.16.0/30`   | `172.16.16.1`   | Core SP            |
+| Filial | VLAN 10    | `172.19.0.0/23`    | `172.19.0.1`    | Core RJ            |
+| Filial | VLAN 20    | `172.19.2.0/23`    | `172.19.2.1`    | Core RJ            |
+| Filial | VLAN 99    | `172.19.99.0/24`   | `172.19.99.1`   | Gerência           |
+| Filial | VLAN 200   | `172.19.4.0/30`    | `172.19.4.1`    | Core RJ            |
+| CPD    | LAN        | `172.16.32.0/22`   | `172.16.32.1`   | CPD Router         |
+| CPD    | Loopback 0 | `192.168.100.1/32` | —               | CPD Router         |
+| WAN 1  | HQ ↔ RJ    | `10.0.0.0/30`      | `.1 / .2`       | Serial             |
+| WAN 2  | RJ ↔ CPD   | `10.0.0.4/30`      | `.5 / .6`       | Serial             |
+| WAN 3  | CPD ↔ HQ   | `10.0.0.8/30`      | `.9 / .10`      | Serial             |
 
 ---
 
-# 📊 19. Tabela Consolidada de Endereçamento
+# 🧱 11. Hierarquia de Endereçamento
 
-## Matriz SP
-
-| VLAN | Segmento                     | Rede             | Máscara           | Gateway       | Broadcast       |
-| ---: | ---------------------------- | ---------------- | ----------------- | ------------- | --------------- |
-|   10 | Segurança Operacional        | `172.16.0.0/22`  | `255.255.252.0`   | `172.16.0.1`  | `172.16.3.255`  |
-|   20 | Núcleo Financeiro            | `172.16.4.0/22`  | `255.255.252.0`   | `172.16.4.1`  | `172.16.7.255`  |
-|   30 | Dados de Mercado / Analytics | `172.16.8.0/22`  | `255.255.252.0`   | `172.16.8.1`  | `172.16.11.255` |
-|   40 | Auditoria / Compliance       | `172.16.12.0/22` | `255.255.252.0`   | `172.16.12.1` | `172.16.15.255` |
-|   99 | Gerência                     | `172.16.99.0/24` | `255.255.255.0`   | `172.16.99.1` | `172.16.99.255` |
-|  200 | Trânsito L3                  | `172.16.16.0/30` | `255.255.255.252` | —             | `172.16.16.3`   |
-
----
-
-## Filial RJ
-
-| VLAN | Segmento            | Rede             | Máscara           | Gateway       | Broadcast       |
-| ---: | ------------------- | ---------------- | ----------------- | ------------- | --------------- |
-|   10 | Supervisão Regional | `172.19.0.0/23`  | `255.255.254.0`   | `172.19.0.1`  | `172.19.1.255`  |
-|   20 | Operações Regionais | `172.19.2.0/23`  | `255.255.254.0`   | `172.19.2.1`  | `172.19.3.255`  |
-|   99 | Gerência            | `172.19.99.0/24` | `255.255.255.0`   | `172.19.99.1` | `172.19.99.255` |
-|  200 | Trânsito L3         | `172.19.4.0/30`  | `255.255.255.252` | —             | `172.19.4.3`    |
-
----
-
-## CPD e WAN
-
-| Identificador        | Finalidade          | Rede / IP          | Máscara           |
-| -------------------- | ------------------- | ------------------ | ----------------- |
-| LAN CPD              | Servidores centrais | `172.16.32.0/22`   | `255.255.252.0`   |
-| Server-Financial-Hub | Servidor central    | `172.16.32.10`     | `255.255.252.0`   |
-| Loopback 0           | Interface lógica    | `192.168.100.1/32` | `255.255.255.255` |
-| WAN 1                | HQ ↔ RJ             | `10.0.0.0/30`      | `255.255.255.252` |
-| WAN 2                | RJ ↔ CPD            | `10.0.0.4/30`      | `255.255.255.252` |
-| WAN 3                | CPD ↔ HQ            | `10.0.0.8/30`      | `255.255.255.252` |
-
----
-
-# 💻 20. Distribuição das Estações
-
-A infraestrutura contém **12 estações de trabalho** distribuídas entre Matriz e Filial.
-
-## Matriz SP — 8 estações
-
-São utilizadas duas estações em cada uma das quatro VLANs departamentais:
+A organização dos prefixos pode ser visualizada da seguinte maneira:
 
 ```text
-VLAN 10 → 2 PCs
-VLAN 20 → 2 PCs
-VLAN 30 → 2 PCs
-VLAN 40 → 2 PCs
-
-TOTAL → 8 PCs
-```
-
-As estações recebem seus parâmetros IPv4 dinamicamente através do DHCP fornecido pelo `HQ-Core-3650`.
-
----
-
-## Filial RJ — 4 estações
-
-A Filial possui:
-
-```text
-VLAN 10 → 2 PCs
-VLAN 20 → 2 PCs
-
-TOTAL → 4 PCs
-```
-
-Os endereços também são obtidos dinamicamente através do DHCP do `Branch-Core-3650`.
-
----
-
-# 📦 21. DHCP — Matriz
-
-O `HQ-Core-3650` atua como servidor DHCP para as quatro VLANs departamentais.
-
-Os primeiros 50 endereços de cada sub-rede são excluídos.
-
-### Exclusões
-
-```text
-172.16.0.1  → 172.16.0.50
-172.16.4.1  → 172.16.4.50
-172.16.8.1  → 172.16.8.50
-172.16.12.1 → 172.16.12.50
-```
-
-### Pools
-
-| Pool             | Rede             | Gateway       | DNS            |
-| ---------------- | ---------------- | ------------- | -------------- |
-| `POOL_SEC_OPS`   | `172.16.0.0/22`  | `172.16.0.1`  | `172.16.32.10` |
-| `POOL_FINANCIAL` | `172.16.4.0/22`  | `172.16.4.1`  | `172.16.32.10` |
-| `POOL_ANALYTICS` | `172.16.8.0/22`  | `172.16.8.1`  | `172.16.32.10` |
-| `POOL_AUDIT`     | `172.16.12.0/22` | `172.16.12.1` | `172.16.32.10` |
-
-Assim, as estações recebem endereços a partir de `.51`.
-
----
-
-# 📦 22. DHCP — Filial RJ
-
-O `Branch-Core-3650` fornece DHCP para as duas VLANs departamentais da Filial.
-
-### Exclusões
-
-```text
-172.19.0.1 → 172.19.0.50
-172.19.2.1 → 172.19.2.50
-```
-
-### Pools
-
-| Pool                 | Rede            | Gateway      | DNS            |
-| -------------------- | --------------- | ------------ | -------------- |
-| `POOL_RJ_SUPERVISAO` | `172.19.0.0/23` | `172.19.0.1` | `172.16.32.10` |
-| `POOL_RJ_OPERATIONS` | `172.19.2.0/23` | `172.19.2.1` | `172.16.32.10` |
-
-As estações da Filial recebem seus endereços a partir do `.51`.
-
----
-
-# 🔀 23. Arquitetura de Switching
-
-A comunicação local utiliza uma separação entre **Camada 2 e Camada 3**.
-
-### Access
-
-Os switches `2960` trabalham como equipamentos de acesso L2.
-
-As portas destinadas às estações são configuradas como:
-
-```text
-switchport mode access
-```
-
-e associadas às respectivas VLANs.
-
-### Core
-
-Os switches `3650` executam:
-
-```text
-ip routing
-```
-
-e hospedam as interfaces SVI.
-
-Dessa forma, o Core funciona como gateway L3 para os segmentos locais.
-
----
-
-# 🔗 24. Trunks 802.1Q
-
-Os enlaces entre Core e Access são configurados como trunks.
-
-### Matriz
-
-O trunk transporta:
-
-```text
-VLAN 10
-VLAN 20
-VLAN 30
-VLAN 40
-VLAN 99
-```
-
-### Filial RJ
-
-O trunk transporta:
-
-```text
-VLAN 10
-VLAN 20
-VLAN 99
-```
-
-A VLAN 200 é utilizada no enlace de trânsito entre Core e roteador e não faz parte do conjunto de VLANs departamentais transportadas pelo trunk de usuários.
-
----
-
-# 🧭 25. Visão Completa do Plano IP
-
-```text
-┌──────────────────────────────────────────────────────────────┐
-│                    INFRAESTRUTURA ANIBIA                    │
-└──────────────────────────────────────────────────────────────┘
-
-                         WAN /30
-              ┌────────────────────────┐
-              │                        │
-       10.0.0.0/30                10.0.0.8/30
-              │                        │
-              ▼                        ▼
-       ┌─────────────┐           ┌─────────────┐
-       │  MATRIZ SP  │           │     CPD     │
-       │  AS 65001   │           │  AS 65002   │
-       └──────┬──────┘           └──────┬──────┘
-              │                         │
-        VLAN 200                    LAN /22
-      172.16.16.0/30             172.16.32.0/22
-              │                         │
-              │                    172.16.32.10
-              │                         │
-              │                  Server-Financial-Hub
-              │
-       ┌──────▼──────┐
-       │ HQ-Core-3650│
-       └──────┬──────┘
-              │
-      ┌───────┴────────┐
-      │                │
- VLAN 10            VLAN 20
- 172.16.0.0/22     172.16.4.0/22
-      │                │
- VLAN 30            VLAN 40
- 172.16.8.0/22     172.16.12.0/22
-
-
-              WAN 1
-          10.0.0.0/30
-              │
-              ▼
-       ┌─────────────┐
-       │ FILIAL RJ   │
-       │ AS 65001    │
-       └──────┬──────┘
-              │
-        VLAN 200
-      172.19.4.0/30
-              │
-       ┌──────▼──────────┐
-       │ Branch-Core-3650│
-       └──────┬──────────┘
-              │
-       ┌──────┴───────┐
-       │              │
-    VLAN 10        VLAN 20
- 172.19.0.0/23   172.19.2.0/23
+IPv4
+│
+├── Matriz SP
+│   └── 172.16.0.0/20
+│       ├── 172.16.0.0/22   → VLAN 10
+│       ├── 172.16.4.0/22   → VLAN 20
+│       ├── 172.16.8.0/22   → VLAN 30
+│       └── 172.16.12.0/22  → VLAN 40
+│
+├── Gerenciamento SP
+│   └── 172.16.99.0/24      → VLAN 99
+│
+├── Trânsito SP
+│   └── 172.16.16.0/30      → VLAN 200
+│
+├── Filial RJ
+│   └── 172.19.0.0/22
+│       ├── 172.19.0.0/23   → VLAN 10
+│       └── 172.19.2.0/23   → VLAN 20
+│
+├── Gerenciamento RJ
+│   └── 172.19.99.0/24      → VLAN 99
+│
+├── Trânsito RJ
+│   └── 172.19.4.0/30       → VLAN 200
+│
+├── CPD
+│   └── 172.16.32.0/22      → Servidores
+│
+├── Loopback
+│   └── 192.168.100.1/32
+│
+└── WAN
+    ├── 10.0.0.0/30         → WAN 1
+    ├── 10.0.0.4/30         → WAN 2
+    └── 10.0.0.8/30         → WAN 3
 ```
 
 ---
 
-# 📋 26. Inventário Geral de Redes
+# 🔗 12. Mapa de Conectividade Física e Lógica
 
-| Categoria | Identificador      | Prefixo            |
-| --------- | ------------------ | ------------------ |
-| HQ        | Supernet principal | `172.16.0.0/20`    |
-| HQ        | VLAN 10            | `172.16.0.0/22`    |
-| HQ        | VLAN 20            | `172.16.4.0/22`    |
-| HQ        | VLAN 30            | `172.16.8.0/22`    |
-| HQ        | VLAN 40            | `172.16.12.0/22`   |
-| HQ        | VLAN 99            | `172.16.99.0/24`   |
-| HQ        | VLAN 200           | `172.16.16.0/30`   |
-| RJ        | Supernet principal | `172.19.0.0/22`    |
-| RJ        | VLAN 10            | `172.19.0.0/23`    |
-| RJ        | VLAN 20            | `172.19.2.0/23`    |
-| RJ        | VLAN 99            | `172.19.99.0/24`   |
-| RJ        | VLAN 200           | `172.19.4.0/30`    |
-| CPD       | LAN de servidores  | `172.16.32.0/22`   |
-| CPD       | Loopback 0         | `192.168.100.1/32` |
-| WAN       | WAN 1              | `10.0.0.0/30`      |
-| WAN       | WAN 2              | `10.0.0.4/30`      |
-| WAN       | WAN 3              | `10.0.0.8/30`      |
+| Origem               | Interface   | Meio / Segmento       | Destino                | Interface |
+| :------------------- | :---------- | :-------------------- | :--------------------- | :-------- |
+| `HQ-Core-3650`       | Trânsito L3 | VLAN 200              | `HQ-Edge-RTR`          | `Gig0/0`  |
+| `HQ-Core-3650`       | `Gig1/0/1`  | Trunk 802.1Q          | `HQ-Access-2960`       | `Gig0/1`  |
+| `Branch-Core-3650`   | Trânsito L3 | VLAN 200              | `Branch-Edge-RTR`      | `Gig0/0`  |
+| `Branch-Core-3650`   | `Gig1/0/1`  | Trunk 802.1Q          | `Branch-Access-2960`   | `Gig0/1`  |
+| `HQ-Edge-RTR`        | `Se0/3/0`   | WAN 1                 | `Branch-Edge-RTR`      | `Se0/3/1` |
+| `Branch-Edge-RTR`    | `Se0/3/0`   | WAN 2                 | `CPD-Datacenter-RTR`   | `Se0/3/1` |
+| `CPD-Datacenter-RTR` | `Se0/3/0`   | WAN 3                 | `HQ-Edge-RTR`          | `Se0/3/1` |
+| `CPD-Datacenter-RTR` | LAN         | Rede `172.16.32.0/22` | `Server-Financial-Hub` | —         |
 
 ---
 
-# 🧠 27. Resumo Arquitetural
-
-A arquitetura pode ser resumida em quatro níveis:
-
-### 1️⃣ Segmentação local
-
-As estações são separadas por VLANs conforme o segmento corporativo.
+# 📌 13. Resumo da Arquitetura
 
 ```text
-Usuário
-   ↓
-VLAN
-   ↓
-Access Switch
+┌─────────────────────────────────────────────────────────────┐
+│                    ANBIMA FINANCIAL HUB                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  MATRIZ SP                 FILIAL RJ              CPD       │
+│  ─────────                 ─────────              ───       │
+│                                                             │
+│  HQ-Edge-RTR               Branch-Edge-RTR        CPD-RTR   │
+│       │                         │                    │       │
+│  HQ-Core-3650              Branch-Core-3650        │       │
+│       │                         │                    │       │
+│  HQ-Access-2960            Branch-Access-2960      │       │
+│       │                         │                    │       │
+│  VLAN 10/20/30/40           VLAN 10/20          Server    │
+│  VLAN 99                    VLAN 99              Hub       │
+│  VLAN 200                   VLAN 200                       │
+│       │                         │                    │       │
+│       └─────────────── WAN ────┴────────────────────┘       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 2️⃣ Roteamento local
+### Inventário de redes
 
-O Core 3650 hospeda as SVIs e realiza o roteamento entre redes locais.
-
-```text
-VLAN
-   ↓
-SVI
-   ↓
-Core L3
-```
-
-### 3️⃣ Conexão com a borda
-
-O Core utiliza a VLAN 200 como rede de trânsito L3 até o roteador.
-
-```text
-Core 3650
-   │
-   │ /30
-   │
-Edge Router
-```
-
-### 4️⃣ Interconexão entre localidades
-
-Os roteadores de borda formam a malha WAN em anel.
-
-```text
-HQ ───── RJ
-│         │
-└── CPD ──┘
-```
+| Categoria               | Quantidade | Prefixos principais |
+| :---------------------- | :--------: | :------------------ |
+| VLANs departamentais SP |     `4`    | `/22`               |
+| VLANs departamentais RJ |     `2`    | `/23`               |
+| VLANs de gerenciamento  |     `2`    | `/24`               |
+| VLANs de trânsito L3    |     `2`    | `/30`               |
+| LAN do CPD              |     `1`    | `/22`               |
+| Loopback                |     `1`    | `/32`               |
+| Enlaces WAN             |     `3`    | `/30`               |
 
 ---
 
-# 📎 28. Relação com os Demais Documentos
+## 📁 14. Referência de Arquivos Relacionados
 
-Este documento estabelece a **base física, lógica e de endereçamento** sobre a qual os demais documentos do projeto são construídos.
-
-| Documento                       | Relação                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------ |
-| `02-routing-and-resilience.md`  | Utiliza as redes e enlaces documentados aqui para explicar OSPF, eBGP e contingência |
-| `03-design-decisions.md`        | Explica o racional das escolhas arquiteturais apresentadas aqui                      |
-| `04-limitations-and-lessons.md` | Analisa as limitações e aprendizados derivados desta implementação                   |
-| `verification-playbook.md`      | Contém os comandos utilizados para verificar os elementos descritos aqui             |
-| `troubleshooting-runbook.md`    | Utiliza esta arquitetura como referência para isolamento de falhas                   |
-
----
-
-# 🖼️ 29. Diagramas do Projeto
-
-Os diagramas visuais associados à arquitetura estão organizados em:
+A arquitetura e o endereçamento documentados aqui servem como base para os demais documentos técnicos do projeto.
 
 ```text
-assets/
-└── diagrams/
-    ├── 01-physical-topology.png
-    ├── 02-logical-topology.png
-    └── 03-wan-ring-routing.png
+docs/
+├── 01-architecture-and-addressing.md
+├── routing-and-resilience.md
+├── design-decisions.md
+└── limitations-and-lessons.md
 ```
 
-### `01-physical-topology.png`
+A separação de responsabilidades entre esses documentos é intencional:
 
-Representação física dos equipamentos, conexões e localidades.
+| Documento                           | Escopo                                                                       |
+| :---------------------------------- | :--------------------------------------------------------------------------- |
+| `01-architecture-and-addressing.md` | **Onde está cada coisa e qual endereço/rede ela utiliza**                    |
+| `routing-and-resilience.md`         | **Como os caminhos são aprendidos, anunciados e utilizados em contingência** |
+| `design-decisions.md`               | **Por que determinadas escolhas arquiteturais foram adotadas**               |
+| `limitations-and-lessons.md`        | **Limitações observadas, restrições do laboratório e aprendizados**          |
 
-### `02-logical-topology.png`
-
-Representação lógica das VLANs, Core L3, Access L2 e redes internas.
-
-### `03-wan-ring-routing.png`
-
-Representação da malha WAN em anel e dos enlaces `/30` entre os roteadores.
-
----
-
-# ✅ 30. Checklist de Arquitetura
-
-* [x] Três localidades documentadas
-* [x] Matriz SP documentada
-* [x] Filial RJ documentada
-* [x] CPD Regulatório documentado
-* [x] Sete equipamentos de rede identificados
-* [x] Servidor central identificado
-* [x] Supernet `172.16.0.0/20` documentada
-* [x] Supernet `172.19.0.0/22` documentada
-* [x] VLANs da Matriz documentadas
-* [x] VLANs da Filial documentadas
-* [x] VLAN 99 de gerenciamento documentada
-* [x] VLAN 200 de trânsito L3 documentada
-* [x] LAN do CPD documentada
-* [x] Loopback `192.168.100.1/32` documentada
-* [x] WAN 1 documentada
-* [x] WAN 2 documentada
-* [x] WAN 3 documentada
-* [x] Endereços DCE/DTE documentados
-* [x] Máscaras documentadas
-* [x] Gateways documentados
-* [x] Broadcasts documentados
-* [x] Pools DHCP documentados
-* [x] Exclusões DHCP documentadas
-* [x] DNS `172.16.32.10` documentado
-* [x] Distribuição das estações documentada
-* [x] Trunks 802.1Q documentados
-* [x] Arquitetura Core/Access documentada
-* [x] Relação entre arquitetura e demais documentos registrada
-
----
-
-> **Fonte técnica:** cenário oficial do PROJETO ANIBIA e sua implementação documentada no Cisco Packet Tracer.
->
-> Este documento descreve a arquitetura e o plano de endereçamento da implementação. Protocolos de roteamento, mecanismos de resiliência, decisões de projeto, limitações e procedimentos operacionais são detalhados nos documentos correspondentes do repositório.
+Este arquivo, portanto, funciona como o **mapa estrutural da infraestrutura**: topologia, ativos, segmentação e endereçamento. Os mecanismos de roteamento, resiliência, justificativas de engenharia e limitações são documentados separadamente para evitar duplicação e manter cada documento com uma função técnica clara.
